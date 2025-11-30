@@ -1,0 +1,1638 @@
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { 
+  Sword, Shield, Zap, FlaskConical, Scroll, Skull, Heart, Dices, 
+  Edit3, Save, X, Plus, Trash2, Flame, Hand, Footprints, 
+  Crosshair, User, BookOpen, Sparkles, Cpu, Feather, Settings, 
+  Brain, Eye, Activity, MessageCircle, Crown, Star, Circle, Disc, 
+  Target, Minus, Sparkle, Tent, Moon, Sun, Coins, Hammer, Gem, Shirt, Link as LinkIcon,
+  AlertTriangle, Ghost, CloudFog, EyeOff, MicOff, Lock, Anchor, FileWarning, Lightbulb,
+  ChevronRight, ChevronLeft
+} from 'lucide-react';
+
+// --- Global Icon Map ---
+const ICON_MAP = {
+  sword: Sword, shield: Shield, zap: Zap, potion: FlaskConical,
+  scroll: Scroll, skull: Skull, flame: Flame, hand: Hand,
+  foot: Footprints, bow: Crosshair, sparkles: Sparkles,
+  hammer: Hammer, gem: Gem, shirt: Shirt, bulb: Lightbulb,
+  crown: Crown
+};
+
+// --- CSS Animations Polyfill ---
+const AnimationStyles = () => (
+  <style>{`
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes zoomIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes shake {
+      0% { transform: translate(1px, 1px) rotate(0deg); }
+      10% { transform: translate(-1px, -2px) rotate(-1deg); }
+      20% { transform: translate(-3px, 0px) rotate(1deg); }
+      30% { transform: translate(3px, 2px) rotate(0deg); }
+      40% { transform: translate(1px, -1px) rotate(1deg); }
+      50% { transform: translate(-1px, 2px) rotate(-1deg); }
+      60% { transform: translate(-3px, 1px) rotate(0deg); }
+      70% { transform: translate(3px, 1px) rotate(-1deg); }
+      80% { transform: translate(-1px, -1px) rotate(1deg); }
+      90% { transform: translate(1px, 2px) rotate(0deg); }
+      100% { transform: translate(1px, -2px) rotate(-1deg); }
+    }
+    
+    .animate-in { animation-fill-mode: both; }
+    .fade-in { animation-name: fadeIn; }
+    .zoom-in { animation-name: zoomIn; }
+    .duration-300 { animation-duration: 300ms; }
+    .duration-500 { animation-duration: 500ms; }
+    .animate-spin { animation: spin 1s linear infinite; }
+    .animate-shake { animation: shake 0.4s linear infinite; }
+    
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(255,255,255,0.1); border-radius: 20px; }
+    .custom-scrollbar:hover::-webkit-scrollbar-thumb { background-color: rgba(255,255,255,0.2); }
+    
+    .scrollbar-hide::-webkit-scrollbar { display: none; }
+    .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  `}</style>
+);
+
+// --- Constants & Config ---
+
+const WHEEL_SIZE = 280; 
+const CENTER = WHEEL_SIZE / 2;
+const RADIUS_OUTER = 125; 
+const RADIUS_INNER = 45; 
+
+const CASTER_CLASSES = [
+    { label: 'None / Martial', value: 'none' },
+    { label: 'Wizard (Full)', value: 'wizard' },
+    { label: 'Sorcerer (Full)', value: 'sorcerer' },
+    { label: 'Bard (Full)', value: 'bard' },
+    { label: 'Cleric (Full)', value: 'cleric' },
+    { label: 'Druid (Full)', value: 'druid' },
+    { label: 'Warlock (Pact)', value: 'warlock' },
+    { label: 'Paladin (Half)', value: 'paladin_half' },
+    { label: 'Ranger (Half)', value: 'ranger_half' },
+    { label: 'Artificer (Half)', value: 'artificer_half' },
+];
+
+const HIT_DICE_OPTIONS = [
+    { label: 'd6 (Wizard/Sorc)', value: 6 },
+    { label: 'd8 (Rogue/Cleric/Warlock)', value: 8 },
+    { label: 'd10 (Fighter/Paladin)', value: 10 },
+    { label: 'd12 (Barbarian)', value: 12 },
+];
+
+const ITEM_TAGS = [
+    { id: 'weapon', label: 'Weapon', icon: Sword },
+    { id: 'armor', label: 'Armor', icon: Shirt },
+    { id: 'potion', label: 'Potion', icon: FlaskConical },
+    { id: 'scroll', label: 'Scroll', icon: Scroll },
+    { id: 'tool', label: 'Tool', icon: Hammer },
+    { id: 'magic', label: 'Wondrous', icon: Sparkles },
+    { id: 'misc', label: 'Misc', icon: Gem },
+    { id: 'shield', label: 'Shield', icon: Shield },
+];
+
+const CONDITIONS = [
+  { id: 'blinded', label: 'Blinded', icon: EyeOff, desc: 'Auto-fail sight checks. Attacks vs you have adv. Your attacks have disadv.' },
+  { id: 'charmed', label: 'Charmed', icon: Heart, desc: 'Cannot attack charmer. Charmer has adv on social checks vs you.' },
+  { id: 'deafened', label: 'Deafened', icon: MicOff, desc: 'Auto-fail hearing checks.' },
+  { id: 'frightened', label: 'Frightened', icon: Ghost, desc: 'Disadv on checks/attacks while source is visible. Cannot move closer.' },
+  { id: 'grappled', label: 'Grappled', icon: Anchor, desc: 'Speed 0.' },
+  { id: 'incapacitated', label: 'Incapacitated', icon: X, desc: 'No actions or reactions.' },
+  { id: 'invisible', label: 'Invisible', icon: CloudFog, desc: 'Heavy obscured. Attacks vs you disadv. Your attacks adv.' },
+  { id: 'paralyzed', label: 'Paralyzed', icon: Activity, desc: 'Incapacitated. Auto-fail Str/Dex saves. Attacks vs you adv + auto-crit if close.' },
+  { id: 'poisoned', label: 'Poisoned', icon: FlaskConical, desc: 'Disadv on attacks and checks.' },
+  { id: 'prone', label: 'Prone', icon: User, desc: 'Crawl speed. Attacks vs you adv (close) / disadv (ranged). Your attacks disadv.' },
+  { id: 'restrained', label: 'Restrained', icon: Lock, desc: 'Speed 0. Attacks vs you adv. Your attacks disadv. Disadv Dex saves.' },
+  { id: 'stunned', label: 'Stunned', icon: Zap, desc: 'Incapacitated. Fails Str/Dex saves. Attacks vs you adv.' },
+  { id: 'unconscious', label: 'Unconscious', icon: Skull, desc: 'Incapacitated, prone, drop items. Fails Str/Dex saves. Attacks vs you adv + auto-crit.' },
+];
+
+const SPELL_TABLE_FULL = [
+    [2,0,0,0,0,0,0,0,0], [3,0,0,0,0,0,0,0,0], [4,2,0,0,0,0,0,0,0], [4,3,0,0,0,0,0,0,0],
+    [4,3,2,0,0,0,0,0,0], [4,3,3,0,0,0,0,0,0], [4,3,3,1,0,0,0,0,0], [4,3,3,2,0,0,0,0,0],
+    [4,3,3,3,1,0,0,0,0], [4,3,3,3,2,0,0,0,0], [4,3,3,3,2,1,0,0,0], [4,3,3,3,2,1,0,0,0],
+    [4,3,3,3,2,1,1,0,0], [4,3,3,3,2,1,1,0,0], [4,3,3,3,2,1,1,1,0], [4,3,3,3,2,1,1,1,0],
+    [4,3,3,3,2,1,1,1,1], [4,3,3,3,3,1,1,1,1], [4,3,3,3,3,2,1,1,1], [4,3,3,3,3,2,2,1,1]
+];
+
+const SPELL_TABLE_WARLOCK = [
+    {count: 1, level: 1}, {count: 2, level: 1}, {count: 2, level: 2}, {count: 2, level: 2},
+    {count: 2, level: 3}, {count: 2, level: 3}, {count: 2, level: 4}, {count: 2, level: 4},
+    {count: 2, level: 5}, {count: 2, level: 5}, {count: 3, level: 5}, {count: 3, level: 5},
+    {count: 3, level: 5}, {count: 3, level: 5}, {count: 3, level: 5}, {count: 3, level: 5},
+    {count: 4, level: 5}, {count: 4, level: 5}, {count: 4, level: 5}, {count: 4, level: 5}
+];
+
+const ABILITIES = [
+  { key: 'str', label: 'Strength', icon: Hand },
+  { key: 'dex', label: 'Dexterity', icon: Footprints },
+  { key: 'con', label: 'Constitution', icon: Heart },
+  { key: 'int', label: 'Intelligence', icon: Brain },
+  { key: 'wis', label: 'Wisdom', icon: Eye },
+  { key: 'cha', label: 'Charisma', icon: MessageCircle },
+];
+
+const SKILLS_LIST = [
+  { key: 'acrobatics', label: 'Acrobatics', attr: 'dex' },
+  { key: 'animal_handling', label: 'Animal Handling', attr: 'wis' },
+  { key: 'arcana', label: 'Arcana', attr: 'int' },
+  { key: 'athletics', label: 'Athletics', attr: 'str' },
+  { key: 'deception', label: 'Deception', attr: 'cha' },
+  { key: 'history', label: 'History', attr: 'int' },
+  { key: 'insight', label: 'Insight', attr: 'wis' },
+  { key: 'intimidation', label: 'Intimidation', attr: 'cha' },
+  { key: 'investigation', label: 'Investigation', attr: 'int' },
+  { key: 'medicine', label: 'Medicine', attr: 'wis' },
+  { key: 'nature', label: 'Nature', attr: 'int' },
+  { key: 'perception', label: 'Perception', attr: 'wis' },
+  { key: 'performance', label: 'Performance', attr: 'cha' },
+  { key: 'persuasion', label: 'Persuasion', attr: 'cha' },
+  { key: 'religion', label: 'Religion', attr: 'int' },
+  { key: 'sleight_of_hand', label: 'Sleight of Hand', attr: 'dex' },
+  { key: 'stealth', label: 'Stealth', attr: 'dex' },
+  { key: 'survival', label: 'Survival', attr: 'wis' },
+];
+
+const COLOR_VARIANTS = {
+  amber: { label: 'Amber', hex: '#d97706', text: 'text-amber-400', textAccent: 'text-amber-200', bgPrimary: 'bg-amber-600', bgSoft: 'bg-amber-500/10', border: 'border-amber-500/50', ring: 'ring-amber-500', button: 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-500/20', tabActiveBorder: 'border-amber-500/50', wheelStroke: 'stroke-amber-500', healthFill: 'bg-amber-600' },
+  red: { label: 'Red', hex: '#dc2626', text: 'text-red-400', textAccent: 'text-red-200', bgPrimary: 'bg-red-600', bgSoft: 'bg-red-500/10', border: 'border-red-500/50', ring: 'ring-red-500', button: 'bg-red-600 hover:bg-red-500 text-white shadow-red-500/20', tabActiveBorder: 'border-red-500/50', wheelStroke: 'stroke-red-500', healthFill: 'bg-red-600' },
+  blue: { label: 'Blue', hex: '#2563eb', text: 'text-blue-400', textAccent: 'text-blue-200', bgPrimary: 'bg-blue-600', bgSoft: 'bg-blue-500/10', border: 'border-blue-500/50', ring: 'ring-blue-500', button: 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/20', tabActiveBorder: 'border-blue-500/50', wheelStroke: 'stroke-blue-500', healthFill: 'bg-blue-600' },
+  emerald: { label: 'Green', hex: '#059669', text: 'text-emerald-400', textAccent: 'text-emerald-200', bgPrimary: 'bg-emerald-600', bgSoft: 'bg-emerald-500/10', border: 'border-emerald-500/50', ring: 'ring-emerald-500', button: 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20', tabActiveBorder: 'border-emerald-500/50', wheelStroke: 'stroke-emerald-500', healthFill: 'bg-emerald-600' },
+  purple: { label: 'Purple', hex: '#9333ea', text: 'text-purple-400', textAccent: 'text-purple-200', bgPrimary: 'bg-purple-600', bgSoft: 'bg-purple-500/10', border: 'border-purple-500/50', ring: 'ring-purple-500', button: 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-500/20', tabActiveBorder: 'border-purple-500/50', wheelStroke: 'stroke-purple-500', healthFill: 'bg-purple-600' },
+  rose: { label: 'Pink', hex: '#e11d48', text: 'text-rose-400', textAccent: 'text-rose-200', bgPrimary: 'bg-rose-600', bgSoft: 'bg-rose-500/10', border: 'border-rose-500/50', ring: 'ring-rose-500', button: 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-500/20', tabActiveBorder: 'border-rose-500/50', wheelStroke: 'stroke-rose-500', healthFill: 'bg-rose-600' },
+  cyan: { label: 'Cyan', hex: '#0891b2', text: 'text-cyan-400', textAccent: 'text-cyan-200', bgPrimary: 'bg-cyan-600', bgSoft: 'bg-cyan-500/10', border: 'border-cyan-500/50', ring: 'ring-cyan-500', button: 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-500/20', tabActiveBorder: 'border-cyan-500/50', wheelStroke: 'stroke-cyan-500', healthFill: 'bg-cyan-600' },
+  slate: { label: 'Grey', hex: '#475569', text: 'text-slate-400', textAccent: 'text-slate-200', bgPrimary: 'bg-slate-600', bgSoft: 'bg-slate-500/10', border: 'border-slate-500/50', ring: 'ring-slate-500', button: 'bg-slate-600 hover:bg-slate-500 text-white shadow-slate-500/20', tabActiveBorder: 'border-slate-500/50', wheelStroke: 'stroke-slate-500', healthFill: 'bg-slate-600' },
+};
+
+// --- INITIAL DATA (Placed before components) ---
+const INITIAL_DATA = {
+  character: { name: "Tav", class: "Artificer", casterType: 'artificer_half', hitDie: 8, level: 3, hp: 42, maxHp: 42, color: 'amber', design: 'fantasy', spellSaveDC: 13, spellAttackBonus: 5, hitDiceCurrent: 3 },
+  currency: { cp: 50, sp: 12, ep: 0, gp: 25, pp: 0 },
+  abilities: { str: 10, dex: 14, con: 14, int: 16, wis: 12, cha: 8 },
+  skills: { arcana: 1, history: 1 }, 
+  story: { background: "A mysterious wanderer...", motivations: "To find the lost artifact...", connections: "Brother to the king..." },
+  notes: [{ id: 'n1', title: 'Session 1', text: 'Met the goblin king.' }],
+  conditions: { exhaustion: 0 },
+  deathSaves: { successes: 0, failures: 0 },
+  spellSlots: { 1: { max: 2, used: 0 }, 2: { max: 0, used: 0 } },
+  sorceryPoints: 0,
+  categories: {
+    actions: [
+      { id: 'a1', name: 'Dagger', icon: 'sword', type: 'Melee', damage: '1d4+2', desc: 'Quick stab.' },
+      { id: 'a4', name: 'Firebolt', icon: 'flame', type: 'Cantrip', damage: '1d10', desc: 'Hurl a mote of fire.', spellLevel: 0 },
+    ],
+    bonus: [],
+    features: [
+        { id: 'f1', name: 'Second Wind', icon: 'zap', type: 'Feature', damage: '-', desc: 'Regain 1d10 + Level HP as a bonus action.', hasResource: true, maxUses: 1, currentUses: 1 }
+    ],
+    spells: [
+      { id: 's1', name: 'Magic Missile', icon: 'zap', type: 'Spell', damage: '3d4+3', desc: 'Create 3 darts of force. Uses a Level 1 slot.', spellLevel: 1 },
+    ],
+    items: [
+        { id: 'i1', name: 'Health Potion', icon: 'potion', type: 'Consumable', damage: '2d4+2', desc: 'Restore hit points.', tag: 'potion', qty: 2 },
+        { id: 'i2', name: 'Longsword', icon: 'sword', type: 'Weapon', damage: '1d8', desc: 'A simple longsword.', tag: 'weapon', qty: 1, equipped: true },
+        // Item setup for dynamic AC calculation (Additive Logic: 10 + X):
+        { id: 'i3', name: 'Studded Leather', icon: 'shirt', type: 'Light Armor', tag: 'armor', qty: 1, equipped: true, acBase: 2, acMaxDex: 99, acBonus: 0, desc: 'Light armor. AC = 10 + 2 + Dex.' },
+        { id: 'i4', name: 'Shield', icon: 'shield', type: 'Shield', tag: 'shield', qty: 1, equipped: true, isShield: true, acBase: 0, acMaxDex: 0, acBonus: 0, desc: 'A basic shield (+2 AC).' },
+        { id: 'i5', name: '+1 Scale Mail', icon: 'shirt', type: 'Medium Armor', tag: 'armor', qty: 1, equipped: false, acBase: 4, acMaxDex: 2, acBonus: 1, desc: 'Medium armor. AC = 10 + 4 + Dex(max 2) + 1.' },
+        { id: 'i6', name: 'Chain Mail', icon: 'shirt', type: 'Heavy Armor', tag: 'armor', qty: 1, equipped: false, acBase: 6, acMaxDex: 0, acBonus: 0, desc: 'Heavy armor. AC 16. No Dex mod.' }
+    ]
+  }
+};
+
+// --- Helper Functions ---
+
+const toRad = (deg) => (deg * Math.PI) / 180;
+const getCoord = (radius, angleInDegrees) => {
+  const angleInRad = toRad(angleInDegrees - 90);
+  return { x: CENTER + radius * Math.cos(angleInRad), y: CENTER + radius * Math.sin(angleInRad) };
+};
+const createWedge = (startAngle, endAngle) => {
+  const startOuter = getCoord(RADIUS_OUTER, startAngle);
+  const endOuter = getCoord(RADIUS_OUTER, endAngle);
+  const startInner = getCoord(RADIUS_INNER, startAngle);
+  const endInner = getCoord(RADIUS_INNER, endAngle);
+  const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
+  return `M ${startInner.x} ${startInner.y} L ${startOuter.x} ${startOuter.y} A ${RADIUS_OUTER} ${RADIUS_OUTER} 0 ${largeArcFlag} 1 ${endOuter.x} ${endOuter.y} L ${endInner.x} ${endInner.y} A ${RADIUS_INNER} ${RADIUS_INNER} 0 ${largeArcFlag} 0 ${startInner.x} ${startInner.y} Z`;
+};
+
+const getModifier = (score) => Math.floor((score - 10) / 2);
+const getProficiencyBonus = (level) => Math.ceil(level / 4) + 1;
+const formatMod = (mod) => (mod >= 0 ? `+${mod}` : mod);
+
+const calculateSpellSlots = (casterType, level) => {
+    const lvlIndex = Math.min(Math.max(1, level), 20) - 1;
+    const slots = {};
+    let effectiveCasterType = casterType;
+    if (casterType.endsWith('_half')) {
+        effectiveCasterType = 'half';
+    }
+
+    if (effectiveCasterType === 'warlock') {
+        const progression = SPELL_TABLE_WARLOCK[lvlIndex];
+        for(let i=1; i<=9; i++) slots[i] = { max: 0, used: 0 };
+        slots[progression.level] = { max: progression.count, used: 0 };
+        return slots;
+    }
+    
+    let tableLevel = lvlIndex;
+    if (effectiveCasterType === 'half') tableLevel = Math.ceil(level / 2) - 1;
+    if (tableLevel < 0) tableLevel = 0;
+    
+    if (effectiveCasterType === 'none') {
+        for(let i=1; i<=9; i++) slots[i] = { max: 0, used: 0 };
+        return slots;
+    }
+    
+    const table = SPELL_TABLE_FULL[tableLevel] || SPELL_TABLE_FULL[0];
+    table.forEach((count, idx) => { slots[idx + 1] = { max: count, used: 0 }; });
+    return slots;
+};
+
+const calculateAC = (abilities, items) => {
+    if (!abilities || !items || !Array.isArray(items)) return 10;
+
+    const dexMod = getModifier(abilities.dex || 10);
+    let bestAC = 10 + dexMod; 
+    const equippedItems = items.filter(i => i.equipped);
+    
+    const armors = equippedItems.filter(i => i.acBase !== undefined && i.tag !== 'shield' && !i.isShield);
+
+    if (armors.length > 0) {
+        const possibleACs = armors.map(armor => {
+            let base = 10 + (armor.acBase || 0); 
+            let dexLimit = armor.acMaxDex; 
+            let appliedDex = dexMod;
+            
+            if (dexLimit === 0) {
+                appliedDex = 0;
+            } else if (dexLimit !== undefined) {
+                appliedDex = Math.min(dexMod, dexLimit);
+            }
+            return base + appliedDex + (armor.acBonus || 0);
+        });
+        bestAC = Math.max(bestAC, Math.max(...possibleACs));
+    }
+
+    const shield = equippedItems.find(i => i.isShield || i.tag === 'shield');
+    if (shield) {
+        bestAC += 2 + (shield.acBonus || 0);
+    }
+    
+    const miscItems = equippedItems.filter(i => 
+        (i.tag === 'magic' || i.tag === 'misc') && 
+        i.acBonus && i.acBase === undefined && 
+        !i.isShield && i.tag !== 'shield'
+    );
+    const miscBonus = miscItems.reduce((sum, item) => sum + (item.acBonus || 0), 0);
+    return bestAC + miscBonus;
+};
+
+const getThemeStyles = (designKey, colorKey) => {
+  const c = COLOR_VARIANTS[colorKey] || COLOR_VARIANTS.amber;
+  const base = {
+    primaryHex: c.hex, text: c.text, textDim: `text-slate-500`, textAccent: c.textAccent, textInverse: `text-white`,
+    bgPrimary: c.bgPrimary, bgSoft: c.bgSoft, borderPrimary: c.border, ring: c.ring,
+    button: `${c.button} shadow-lg border border-white/10`,
+    tabActive: `bg-[#13151f]/90 ${c.text} ${c.tabActiveBorder} border-b-transparent backdrop-blur-md`,
+    tabInactive: `bg-[#0f111a]/50 text-slate-500 border-white/10 hover:bg-[#151722] hover:text-slate-300`,
+    wheelFillBase: '#1a1d29', wheelFillHover: '#2d3345',
+    healthBarBg: 'bg-slate-900/80 border-2 border-white/20', healthBarFill: 'bg-red-700',
+    appBgStyle: {},
+  };
+
+  const themes = {
+    fantasy: { ...base, id: 'fantasy', icon: Sparkles, font: 'font-sans', bgApp: 'bg-[#0b0c15]', bgPanel: 'bg-[#13151f]/95 backdrop-blur-md', rounded: 'rounded-2xl', roundedBtn: 'rounded-xl', border: 'border-2', shadow: 'shadow-2xl' },
+    book: { ...base, id: 'book', icon: Feather, font: 'font-serif', bgApp: 'bg-[#c9bb9e]', bgPanel: 'bg-[#dcd0b5] shadow-sm', rounded: 'rounded-sm', roundedBtn: 'rounded-md', border: 'border-[3px]', shadow: 'shadow-lg shadow-stone-400/20', text: `text-black`, textDim: `text-neutral-900`, textAccent: `text-black`, textInverse: `text-black`, bgPrimary: c.bgPrimary.replace('600', '700'), bgSoft: `${c.bgSoft.replace('/10', '/30')}`, borderPrimary: `border-[#5c4033]/40`, button: `bg-[#dcd0b5] text-black hover:bg-[#c2b8a2] shadow-md border-2 border-[#5c4033]`, tabActive: `bg-[#dcd0b5] text-black font-bold border-[#5c4033] border-b-[#dcd0b5]`, tabInactive: `bg-[#b8ae96] text-neutral-900 hover:bg-[#c2b8a2] hover:text-black border-[#5c4033]/60`, wheelFillBase: '#b8ae96', wheelFillHover: '#a69c86', healthBarBg: 'bg-[#b8ae96] border-2 border-[#5c4033]', healthBarFill: 'bg-[#8b2323]', appBgStyle: { backgroundImage: 'radial-gradient(#b8ae96 1px, transparent 1px)', backgroundSize: '20px 20px' } },
+    cyberpunk: { ...base, id: 'cyberpunk', icon: Cpu, font: 'font-mono', bgApp: 'bg-[#050505]', bgPanel: 'bg-black', rounded: 'rounded-none', roundedBtn: 'rounded-none', border: 'border-2', shadow: 'shadow-[0_0_15px_rgba(0,0,0,1)]', text: c.text, textDim: `${c.text.replace('400', '900')}`, textAccent: c.textAccent, textInverse: `text-black`, bgPrimary: c.bgPrimary, bgSoft: 'bg-zinc-900', borderPrimary: c.border.replace('/50', ''), button: `bg-black border-2 ${c.border.replace('/50', '')} ${c.text} hover:${c.textAccent} hover:border-white shadow-[0_0_10px_currentColor]`, tabActive: `bg-black ${c.text} ${c.border.replace('/50', '')} border-b-black`, tabInactive: `bg-[#111] text-slate-600 border-slate-800 hover:text-slate-400`, wheelFillBase: '#0a0a0a', wheelFillHover: '#1a1a1a', healthBarBg: 'bg-[#111] border-2 border-slate-800', healthBarFill: `${c.bgPrimary} shadow-[0_0_10px_currentColor]`, appBgStyle: { backgroundImage: `linear-gradient(rgba(255,255,255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255, 0.03) 1px, transparent 1px)`, backgroundSize: '40px 40px' } },
+    steampunk: { ...base, id: 'steampunk', icon: Settings, font: 'font-mono', bgApp: 'bg-[#2a2620]', bgPanel: 'bg-[#1e1b16]', rounded: 'rounded-lg', roundedBtn: 'rounded-md', border: 'border-[3px]', shadow: 'shadow-xl shadow-black/50', text: `text-[#e2dcc8]`, textDim: `text-[#8a806d]`, textAccent: c.text, textInverse: `text-[#0f0d0b]`, bgPrimary: `bg-[#4a3b2a]`, bgSoft: `bg-[#13110e]`, borderPrimary: `border-[#8b5a2b]`, button: `bg-gradient-to-b from-[#4a3b2a] to-[#2e2419] border-2 border-[#8b5a2b] text-[#cd7f32] hover:text-[#ffd700] hover:border-[#ffd700]`, tabActive: `bg-[#1e1b16] text-[#cd7f32] border-[#8b5a2b] border-b-[#1e1b16]`, tabInactive: `bg-[#0e0c0a] text-[#5c5042] border-[#3e3529] hover:text-[#8a806d]`, wheelFillBase: '#13110e', wheelFillHover: '#24201a', healthBarBg: 'bg-[#0f0d0b] border-2 border-[#5c4033]', healthBarFill: 'bg-gradient-to-r from-red-900 to-red-600', appBgStyle: { backgroundImage: 'repeating-linear-gradient(45deg, #231f1a 25%, transparent 25%, transparent 75%, #231f1a 75%, #231f1a), repeating-linear-gradient(45deg, #231f1a 25%, #2a2620 25%, #2a2620 75%, #231f1a 75%, #231f1a)', backgroundPosition: '0 0, 10px 10px', backgroundSize: '20px 20px' } }
+  };
+  return themes[designKey] || themes.fantasy;
+};
+
+// --- FANCY DICE COMPONENTS ---
+
+const DiceShape = ({ type, value, className, style }) => {
+    // Generate unique ID for gradients to avoid conflict
+    const id = useMemo(() => Math.random().toString(36).substr(2, 9), []);
+    
+    const getPath = (t) => {
+        switch(t) {
+            case 4: return "M50 5 L90 85 L10 85 Z"; 
+            case 6: return "M15 15 Q15 10 20 10 L80 10 Q85 10 85 15 L85 85 Q85 90 80 90 L20 90 Q15 90 15 85 Z";
+            case 8: return "M50 5 L90 50 L50 95 L10 50 Z";
+            case 10: return "M50 5 L85 45 L50 95 L15 45 Z";
+            case 12: return "M50 5 L88 32 L73 78 L27 78 L12 32 Z"; 
+            case 20: default: return "M50 5 L93 28 L93 72 L50 95 L7 72 L7 28 Z";
+        }
+    };
+
+    const getInnerPath = (t) => {
+         switch(t) {
+            case 4: return "M50 5 L50 55 L90 85 M50 55 L10 85"; 
+            case 6: return "M20 20 L80 80"; 
+            case 8: return "M10 50 L90 50 M50 5 L50 95";
+            case 10: return "M50 5 L50 95 M15 45 L85 45";
+            case 12: return "M50 50 L50 5 M50 50 L88 32 M50 50 L73 78 M50 50 L27 78 M50 50 L12 32";
+            case 20: default: return "M50 30 L80 70 L20 70 Z M50 30 L50 5 M50 30 L93 28 M50 30 L7 28 M80 70 L93 72 M80 70 L50 95 M20 70 L50 95 M20 70 L7 72";
+        }
+    }
+
+    return (
+        <div className={`relative w-20 h-20 flex items-center justify-center transition-all duration-300 ${className}`}>
+            <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-xl overflow-visible">
+                <defs>
+                    <linearGradient id={`grad-${id}`} x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="currentColor" stopOpacity="0.7" />
+                        <stop offset="50%" stopColor="currentColor" stopOpacity="0.4" />
+                        <stop offset="100%" stopColor="currentColor" stopOpacity="0.9" />
+                    </linearGradient>
+                </defs>
+                <path d={getPath(type)} fill={`url(#grad-${id})`} stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                <path d={getInnerPath(type)} fill="none" stroke="white" strokeWidth="1" strokeOpacity="0.4" />
+                <text x="50" y="55" dominantBaseline="middle" textAnchor="middle" fill="white" fontSize="28" fontWeight="900" style={{ textShadow: '0px 2px 4px rgba(0,0,0,0.6)' }}>
+                    {value}
+                </text>
+            </svg>
+        </div>
+    )
+}
+
+const DiceRoller = React.memo(({ formula, style }) => {
+  const [result, setResult] = useState({ total: null, dice: [] });
+  const [rolling, setRolling] = useState(false);
+  const [displayDice, setDisplayDice] = useState([]); 
+
+  const parsed = useMemo(() => {
+      const dice = [];
+      let modifier = 0;
+      if (!formula) return { dice: [], modifier: 0, isText: true };
+      const parts = formula.toLowerCase().replace(/\s/g, '').match(/(-?\d*d\d+)|(-?\d+)/g) || [];
+      parts.forEach(p => {
+          if (p.includes('d')) {
+              const [countStr, facesStr] = p.split('d');
+              const count = parseInt(countStr) || (countStr === '-' ? -1 : 1);
+              const faces = parseInt(facesStr) || 20;
+              for(let i=0; i<Math.abs(count); i++) dice.push({ faces, multiplier: count < 0 ? -1 : 1 });
+          } else {
+              modifier += parseInt(p) || 0;
+          }
+      });
+      if(dice.length === 0 && modifier === 0 && !formula.includes('d')) {
+          return { dice: [], modifier: 0, isText: true, text: formula };
+      }
+      return { dice, modifier };
+  }, [formula]);
+
+  useEffect(() => {
+    if (!formula || parsed.isText) {
+        setResult({ total: parsed.text || formula, dice: [] });
+        return;
+    }
+    setRolling(true); setResult(null);
+    const interval = setInterval(() => {
+        const randoms = parsed.dice.map(d => ({ faces: d.faces, val: Math.floor(Math.random() * d.faces) + 1 }));
+        setDisplayDice(randoms);
+    }, 80);
+    const timer = setTimeout(() => {
+      clearInterval(interval);
+      let total = parsed.modifier;
+      const finalDice = parsed.dice.map(d => {
+          const val = Math.floor(Math.random() * d.faces) + 1;
+          total += (val * d.multiplier);
+          return { faces: d.faces, val: val * d.multiplier, actualVal: val };
+      });
+      setResult({ total, dice: finalDice });
+      setDisplayDice(finalDice.map(d => ({ faces: d.faces, val: d.actualVal })));
+      setRolling(false);
+    }, 800);
+    return () => { clearTimeout(timer); clearInterval(interval); };
+  }, [formula, parsed]);
+
+  if (parsed.isText) return <div className={`text-2xl font-bold ${style.text}`}>{parsed.text || formula}</div>;
+  const modifierDisplay = parsed.modifier !== 0 ? (parsed.modifier > 0 ? `+${parsed.modifier}` : parsed.modifier) : '';
+
+  return (
+    <div className="flex flex-col items-center justify-center w-full">
+      <div className="flex flex-wrap justify-center gap-2 mb-4 min-h-[5rem]">
+          {(rolling ? displayDice : result?.dice || []).map((d, i) => (
+              <div key={i} className={`${rolling ? 'animate-shake' : 'animate-in zoom-in duration-500'}`}>
+                  <DiceShape type={d.faces} value={d.val} className={style.text} style={style} />
+              </div>
+          ))}
+      </div>
+      <div className={`text-5xl font-black drop-shadow-md ${style.id === 'book' ? style.text : 'text-white'} animate-in fade-in slide-in-from-bottom-2`}>{rolling ? '...' : result?.total}</div>
+      <div className={`text-[10px] uppercase tracking-[0.2em] mt-2 opacity-60 ${style.textDim}`}>{rolling ? 'Rolling' : 'Total'} {modifierDisplay}</div>
+    </div>
+  );
+});
+
+const SimpleRollModal = ({ style, title, mod, onClose }) => {
+    const formula = `1d20${mod >= 0 ? '+' : ''}${mod}`;
+    return (
+        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
+            <div className={`${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} p-8 ${style.shadow} flex flex-col items-center gap-6 min-w-[300px]`} onClick={e => e.stopPropagation()}>
+                <h3 className={`text-xl font-bold uppercase tracking-widest ${style.text}`}>{title}</h3>
+                <div className="w-full flex justify-center py-6"><DiceRoller formula={formula} style={style} /></div>
+                <button onClick={onClose} className={`mt-4 px-8 py-3 ${style.button} ${style.roundedBtn} font-bold text-sm uppercase tracking-wider shadow-xl`}>Close</button>
+            </div>
+        </div>
+    );
+};
+
+const HealthModal = ({ style, hp, maxHp, onClose, onApply }) => {
+    const [amount, setAmount] = useState('');
+    
+    return (
+        <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
+            <div className={`${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} w-full max-w-sm p-6 ${style.shadow} flex flex-col gap-6`} onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center border-b border-white/10 pb-4">
+                    <h3 className={`text-lg font-bold flex items-center gap-2 ${style.id === 'book' ? style.text : 'text-white'}`}><Heart size={18} /> Manage Health</h3>
+                    <button onClick={onClose} className={`${style.textDim} hover:text-white`}><X /></button>
+                </div>
+                
+                <div className="text-center">
+                    <span className={`text-4xl font-black ${style.text}`}>{hp} <span className="text-xl font-medium opacity-50">/ {maxHp}</span></span>
+                    <div className={`text-[10px] uppercase tracking-widest ${style.textDim} mt-1`}>Current HP</div>
+                </div>
+
+                <div className="flex gap-2 justify-center">
+                    {[1, 5, 10].map(val => (
+                        <button key={val} onClick={() => setAmount(val)} className={`px-3 py-1 rounded border border-white/10 text-xs font-bold ${style.textDim} hover:text-white hover:border-white/30 transition-all`}>+{val}</button>
+                    ))}
+                </div>
+
+                <div className="relative">
+                    <input 
+                        type="number" 
+                        value={amount} 
+                        onChange={(e) => setAmount(e.target.value)} 
+                        placeholder="Amount"
+                        className={`w-full bg-black/20 border-2 ${style.borderPrimary} ${style.roundedBtn} p-4 text-center text-2xl font-bold ${style.text} outline-none focus:border-${style.primaryHex} transition-colors`}
+                        autoFocus
+                    />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                    <button 
+                        onClick={() => { onApply('damage', parseInt(amount) || 0); onClose(); }} 
+                        className={`py-4 bg-red-900/50 border-2 border-red-800 text-red-200 font-bold uppercase tracking-wider rounded-xl hover:bg-red-800/50 hover:border-red-500 transition-all flex flex-col items-center gap-1`}
+                    >
+                        <Sword size={20} /> Damage
+                    </button>
+                    <button 
+                        onClick={() => { onApply('heal', parseInt(amount) || 0); onClose(); }} 
+                        className={`py-4 bg-green-900/50 border-2 border-green-800 text-green-200 font-bold uppercase tracking-wider rounded-xl hover:bg-green-800/50 hover:border-green-500 transition-all flex flex-col items-center gap-1`}
+                    >
+                        <Heart size={20} /> Heal
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+const ConditionsModal = ({ style, data, onClose, onToggleCondition, onSetExhaustion }) => {
+    return (
+        <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className={`${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} w-full max-w-2xl p-6 ${style.shadow} flex flex-col gap-4 max-h-[90vh] overflow-y-auto custom-scrollbar`}>
+                <div className="flex justify-between items-center border-b border-white/10 pb-4">
+                    <h3 className={`text-lg font-bold flex items-center gap-2 ${style.id === 'book' ? style.text : 'text-white'}`}><Activity size={18} /> Conditions & Exhaustion</h3>
+                    <button onClick={onClose} className={`${style.textDim} hover:text-white`}><X /></button>
+                </div>
+                
+                {/* Exhaustion */}
+                <div className={`p-4 ${style.bgSoft} ${style.roundedBtn} border ${style.borderPrimary} flex flex-col md:flex-row items-center justify-between gap-4`}>
+                    <div className="flex items-center gap-2">
+                        <AlertTriangle className="text-orange-500" />
+                        <div>
+                            <div className={`font-bold ${style.text}`}>Exhaustion</div>
+                            <div className={`text-[10px] ${style.textDim}`}>Level {data.conditions?.exhaustion || 0} / 6</div>
+                        </div>
+                    </div>
+                    <div className="flex gap-1">
+                        {Array.from({length: 6}).map((_, i) => (
+                            <button 
+                                key={i} 
+                                onClick={() => onSetExhaustion(i + 1 === (data.conditions?.exhaustion || 0) ? 0 : i + 1)}
+                                className={`w-8 h-8 rounded border-2 font-bold flex items-center justify-center transition-all ${i < (data.conditions?.exhaustion || 0) ? 'bg-orange-600 border-orange-500 text-white' : `border-white/10 ${style.textDim} hover:border-orange-500`}`}
+                            >
+                                {i + 1}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Conditions Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {CONDITIONS.map(cond => {
+                        const isActive = data.conditions?.[cond.id];
+                        const Icon = cond.icon;
+                        return (
+                            <div key={cond.id} onClick={() => onToggleCondition(cond.id)} className={`p-3 ${style.roundedBtn} border-2 cursor-pointer transition-all relative overflow-hidden group ${isActive ? `${style.bgPrimary} border-transparent` : `bg-black/20 ${style.borderPrimary} hover:bg-white/5`}`}>
+                                <div className="flex items-center gap-2 mb-1">
+                                    <Icon size={16} className={isActive ? 'text-white' : style.textDim} />
+                                    <span className={`text-xs font-bold uppercase ${isActive ? 'text-white' : style.text}`}>{cond.label}</span>
+                                </div>
+                                <p className={`text-[9px] leading-tight ${isActive ? 'text-white/80' : style.textDim}`}>{cond.desc}</p>
+                            </div>
+                        )
+                    })}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const DeathSaveModal = ({ style, deathSaves, onClose, onCommitResult, onStabilize }) => {
+    const [rolling, setRolling] = useState(false);
+    const [processing, setProcessing] = useState(false);
+    const [displayVal, setDisplayVal] = useState(20);
+    const [resultMessage, setResultMessage] = useState(null);
+
+    const handleRoll = () => {
+        if (processing) return;
+        setRolling(true);
+        setProcessing(true);
+        setResultMessage(null);
+        let interval = setInterval(() => {
+            setDisplayVal(Math.floor(Math.random() * 20) + 1);
+        }, 80);
+
+        setTimeout(() => {
+            clearInterval(interval);
+            const finalRoll = Math.floor(Math.random() * 20) + 1;
+            setDisplayVal(finalRoll);
+            setRolling(false);
+            
+            let msg = '';
+            if (finalRoll === 20) msg = 'CRITICAL SUCCESS! (+1 HP)';
+            else if (finalRoll === 1) msg = 'CRITICAL FAIL! (2 Failures)';
+            else if (finalRoll >= 10) msg = 'Success!';
+            else msg = 'Failure!';
+            setResultMessage(msg);
+
+            setTimeout(() => {
+                onCommitResult(finalRoll);
+                setResultMessage(null);
+                setProcessing(false);
+            }, 1500); 
+        }, 1000);
+    };
+
+    const isGameOver = deathSaves.successes >= 3 || deathSaves.failures >= 3;
+
+    return (
+        <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className={`w-full max-w-md p-8 flex flex-col items-center gap-8 border-y-4 border-red-900 bg-black/80 relative`}>
+                <button onClick={onClose} className="absolute top-4 right-4 text-slate-500 hover:text-white"><X /></button>
+                <div className="text-center">
+                    <h2 className="text-3xl font-black text-red-600 uppercase tracking-widest mb-2 animate-pulse">Unconscious</h2>
+                    <p className="text-slate-400 text-xs uppercase tracking-wide">Make Death Saving Throws</p>
+                </div>
+                
+                <div className="h-32 flex items-center justify-center relative">
+                     <div className={`${rolling ? 'animate-shake' : 'animate-in zoom-in'}`}>
+                        <DiceShape type={20} value={displayVal} className={rolling ? 'text-slate-500' : (displayVal === 20 ? 'text-green-500' : displayVal === 1 ? 'text-red-500' : displayVal >= 10 ? 'text-white' : 'text-red-400')} style={style} />
+                     </div>
+                     {resultMessage && <div className="absolute -bottom-8 whitespace-nowrap font-black uppercase tracking-widest text-lg animate-in zoom-in slide-in-from-bottom-2 text-white drop-shadow-[0_2px_4px_rgba(0,0,0,1)]">{resultMessage}</div>}
+                </div>
+
+                <div className="flex gap-8 w-full justify-center">
+                    <div className="flex flex-col items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase text-green-500 tracking-widest">Successes</span>
+                        <div className="flex gap-2">
+                            {Array.from({length: 3}).map((_, i) => (
+                                <div key={i} className={`w-6 h-6 rounded-full border-2 border-green-900 flex items-center justify-center ${i < deathSaves.successes ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-black'}`}>
+                                    {i < deathSaves.successes && <div className="w-full h-full rounded-full bg-green-400 animate-in zoom-in" />}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="flex flex-col items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase text-red-500 tracking-widest">Failures</span>
+                        <div className="flex gap-2">
+                            {Array.from({length: 3}).map((_, i) => (
+                                <div key={i} className={`w-6 h-6 rounded-full border-2 border-red-900 flex items-center justify-center ${i < deathSaves.failures ? 'bg-red-600 shadow-[0_0_10px_#dc2626]' : 'bg-black'}`}>
+                                    {i < deathSaves.failures && <X size={16} className="text-white animate-in zoom-in" strokeWidth={4} />}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                {!isGameOver && (
+                     <button 
+                        onClick={handleRoll} 
+                        disabled={processing}
+                        className={`w-full py-4 border-2 font-black uppercase tracking-widest text-lg transition-all flex items-center justify-center gap-3 rounded ${
+                            processing 
+                            ? 'bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed' 
+                            : 'bg-gradient-to-r from-red-900 to-slate-900 border-red-700 text-white hover:scale-105 shadow-[0_0_20px_rgba(220,38,38,0.4)]'
+                        }`}
+                     >
+                        <Dices size={24} className={rolling ? 'animate-spin' : ''} /> 
+                        {rolling ? 'Rolling...' : 'Roll Death Save'}
+                     </button>
+                )}
+
+                {deathSaves.successes >= 3 && (
+                    <div className="text-green-400 font-bold text-center animate-in zoom-in">
+                        <Heart size={48} className="mx-auto mb-2 text-green-500" />
+                        STABILIZED
+                        <div className="text-xs text-slate-500 font-normal mt-1">You are stable at 0 HP.</div>
+                    </div>
+                )}
+                 {deathSaves.failures >= 3 && (
+                    <div className="text-red-500 font-bold text-center animate-in zoom-in">
+                        <Skull size={48} className="mx-auto mb-2" />
+                        DECEASED
+                        <div className="text-xs text-slate-500 font-normal mt-1">Check with your DM for resurrection options.</div>
+                    </div>
+                )}
+                
+                <div className="border-t border-white/10 pt-4 w-full flex justify-center">
+                     <button onClick={onStabilize} className="text-xs text-blue-400 hover:text-blue-300 font-bold uppercase tracking-wider flex items-center gap-2"><Plus size={12} /> Auto-Stabilize (Healer's Kit)</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const FeaturesPanel = ({ style, items, selectedAction, editMode, onSliceClick, onAddNew, onUpdateItem }) => {
+    const handleResource = (e, item, delta) => {
+        e.stopPropagation();
+        onUpdateItem({ ...item, currentUses: Math.max(0, Math.min(item.maxUses, (item.currentUses || 0) + delta)) });
+    };
+
+    return (
+        <div className={`w-full max-w-sm md:w-[320px] h-[400px] ${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} flex flex-col overflow-hidden animate-in zoom-in duration-300 ${style.shadow}`}>
+            <div className={`px-4 py-3 border-b-2 ${style.borderPrimary} flex justify-between items-center bg-black/5`}>
+                <div className="flex items-center gap-2">
+                    <Lightbulb size={14} className={style.text} strokeWidth={2.5}/>
+                    <span className={`font-bold text-xs tracking-wide uppercase ${style.id === 'book' ? style.text : 'text-slate-200'}`}>Class Features & Feats</span>
+                </div>
+                {editMode && <button onClick={onAddNew} className={`${style.button} px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 transition-all`}><Plus size={10} strokeWidth={3}/> Add</button>}
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                {(!items || items.length === 0) ? <div className={`h-full flex flex-col items-center justify-center space-y-2 opacity-50 ${style.textDim}`}><Lightbulb size={24} /><span className="text-xs">No features added</span></div> : null}
+                {items && items.map((item) => {
+                    const IconComp = ICON_MAP[item.icon] || Lightbulb;
+                    const isSelected = selectedAction && selectedAction.id === item.id;
+                    const hasResource = item.hasResource && item.maxUses > 0;
+                    
+                    return (
+                        <div key={item.id} onClick={() => onSliceClick(item)} className={`group p-2.5 ${style.roundedBtn} border-2 flex flex-col gap-2 cursor-pointer transition-all duration-200 ${isSelected ? `${style.bgSoft} border-${style.primaryHex} ${style.shadow}` : `bg-transparent ${style.borderPrimary} hover:${style.bgSoft}`}`} style={{ borderColor: isSelected ? style.primaryHex : '' }}>
+                            <div className="flex items-center gap-3">
+                                <div className={`w-8 h-8 ${style.roundedBtn} flex items-center justify-center transition-colors ${isSelected ? style.button : `${style.bgSoft} ${style.textDim} group-hover:${style.text}`}`}><IconComp size={16} strokeWidth={2.5} /></div>
+                                <div className="flex-1 min-w-0">
+                                    <h4 className={`font-bold text-xs truncate ${isSelected ? style.textAccent : style.text}`}>{item.name}</h4>
+                                    <p className={`text-[9px] truncate ${style.textDim}`}>{item.desc}</p>
+                                </div>
+                            </div>
+                            {hasResource && (
+                                <div className="flex items-center justify-between bg-black/20 rounded p-1.5 mt-1" onClick={e => e.stopPropagation()}>
+                                    <span className={`text-[9px] font-bold uppercase tracking-wider ${style.textDim} ml-1`}>Uses</span>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={(e) => handleResource(e, item, -1)} className={`${style.textDim} hover:text-white p-0.5`}><Minus size={12}/></button>
+                                        <div className="flex gap-1">
+                                            {item.maxUses <= 5 ? (
+                                                Array.from({length: item.maxUses}).map((_, i) => (
+                                                    <div key={i} className={`w-2 h-2 rounded-full border ${style.borderPrimary} ${i < (item.currentUses || 0) ? style.bgPrimary : 'opacity-20'}`} />
+                                                ))
+                                            ) : (
+                                                <span className={`text-xs font-mono font-bold ${style.text}`}>{item.currentUses} / {item.maxUses}</span>
+                                            )}
+                                        </div>
+                                        <button onClick={(e) => handleResource(e, item, 1)} className={`${style.textDim} hover:text-white p-0.5`}><Plus size={12}/></button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )
+                })}
+            </div>
+        </div>
+    );
+};
+
+const InventoryPanel = ({ style, items, currency, editMode, onUpdateItem, onAdd, onDelete, onUpdateCurrency, onSliceClick, selectedAction }) => {
+    const [filter, setFilter] = useState('all');
+    const filteredItems = useMemo(() => {
+        if (!items) return [];
+        if (filter === 'all') return items;
+        if (filter === 'equipped') return items.filter(i => i.equipped);
+        return items.filter(i => i.tag === filter);
+    }, [items, filter]);
+
+    const handleQty = (e, item, delta) => {
+        e.stopPropagation();
+        onUpdateItem({ ...item, qty: Math.max(0, (item.qty || 1) + delta) });
+    };
+
+    return (
+        <div className={`w-full max-w-lg flex flex-col h-full max-h-[500px] gap-3 animate-in zoom-in duration-300`}>
+            <div className={`${style.bgPanel} ${style.roundedBtn} ${style.border} ${style.borderPrimary} p-3 flex justify-between items-center`}>
+                {['cp','sp','ep','gp','pp'].map(denom => (
+                    <div key={denom} className="flex flex-col items-center">
+                        <span className={`text-[9px] font-black uppercase ${style.textDim}`}>{denom}</span>
+                        {editMode ? (
+                            <input type="number" value={currency[denom]} onChange={(e) => onUpdateCurrency(denom, parseInt(e.target.value))} className={`w-10 text-center bg-black/20 ${style.roundedBtn} ${style.text} text-xs font-bold outline-none`} />
+                        ) : (
+                            <span className={`font-mono font-bold ${style.text}`}>{currency[denom]}</span>
+                        )}
+                    </div>
+                ))}
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                {['all', 'equipped', 'weapon', 'armor', 'potion', 'magic', 'shield'].map(f => (
+                    <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase whitespace-nowrap border transition-colors ${filter === f ? `${style.bgPrimary} text-white border-transparent` : `${style.bgSoft} ${style.textDim} border-transparent hover:border-white/20`}`}>{f}</button>
+                ))}
+            </div>
+            <div className={`flex-1 overflow-y-auto ${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} custom-scrollbar p-2 space-y-2`}>
+                {filteredItems.map(item => {
+                    const TagIcon = ICON_MAP[item.icon] || (ITEM_TAGS.find(t => t.id === item.tag)?.icon || Gem);
+                    const isSelected = selectedAction && selectedAction.id === item.id;
+                    const acDisplay = (item.acBase || 0) + (item.acBonus || 0);
+                    return (
+                        <div key={item.id} onClick={() => onSliceClick(item)} className={`relative p-2 ${style.roundedBtn} border transition-all cursor-pointer flex items-center gap-3 ${isSelected ? `${style.bgSoft} border-${style.primaryHex}` : `bg-transparent ${style.borderPrimary} hover:bg-white/5`}`}>
+                            <div className={`w-8 h-8 rounded flex items-center justify-center ${item.equipped ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500' : 'bg-black/20 text-slate-500'}`}><TagIcon size={16} /></div>
+                            <div className="flex-1">
+                                <div className={`text-sm font-bold ${item.equipped ? 'text-amber-400' : style.text}`}>{item.name} {acDisplay > 0 && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-blue-500/20 text-blue-300 rounded border border-blue-500/30">+{acDisplay} AC</span>} {item.tag === 'potion' && item.damage && item.damage !== '-' && <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-red-500/20 text-red-300 rounded border border-red-500/30">{item.damage} HP</span>}</div>
+                                <div className={`text-[10px] ${style.textDim} uppercase tracking-wider`}>{item.tag || 'Item'}</div>
+                            </div>
+                            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                {editMode && <button onClick={(e) => handleQty(e, item, -1)} className="p-1 hover:text-red-400"><Minus size={12}/></button>}
+                                <span className={`font-mono text-xs ${style.text}`}>x{item.qty || 1}</span>
+                                {editMode && <button onClick={(e) => handleQty(e, item, 1)} className="p-1 hover:text-green-400"><Plus size={12}/></button>}
+                            </div>
+                        </div>
+                    );
+                })}
+                {editMode && (
+                    <button onClick={() => onAdd()} className={`w-full py-2 border-2 border-dashed border-white/10 ${style.roundedBtn} ${style.textDim} hover:text-white hover:border-white/30 flex items-center justify-center gap-2 text-xs font-bold`}><Plus size={14} /> Add Item</button>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const RestModal = ({ style, data, onClose, onRest }) => {
+    const [restType, setRestType] = useState('short');
+    const [healRoll, setHealRoll] = useState(null);
+    const [healing, setHealing] = useState(false);
+    const conMod = getModifier(data.abilities.con);
+    const hitDieVal = data.character.hitDie || 8;
+    const hitDiceMax = data.character.level;
+    const hitDiceCurrent = data.character.hitDiceCurrent !== undefined ? data.character.hitDiceCurrent : hitDiceMax;
+
+    const handleRollHitDie = () => {
+        if (hitDiceCurrent <= 0) return;
+        setHealing(true);
+        setTimeout(() => {
+            const roll = Math.floor(Math.random() * hitDieVal) + 1;
+            const total = Math.max(1, roll + conMod);
+            setHealRoll({ roll, total });
+            onRest('heal', total); 
+            setHealing(false);
+        }, 600);
+    };
+    const healthPct = Math.min(100, (data.character.hp / data.character.maxHp) * 100);
+
+    return (
+        <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className={`${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} w-full max-w-md p-6 ${style.shadow} flex flex-col gap-6`}>
+                <div className="flex justify-center gap-4 border-b border-white/10 pb-4">
+                    <button onClick={() => setRestType('short')} className={`px-4 py-2 rounded-lg font-bold transition-all ${restType === 'short' ? `${style.bgPrimary} text-white` : `${style.textDim} hover:text-white`}`}>Short Rest</button>
+                    <button onClick={() => setRestType('long')} className={`px-4 py-2 rounded-lg font-bold transition-all ${restType === 'long' ? `${style.bgPrimary} text-white` : `${style.textDim} hover:text-white`}`}>Long Rest</button>
+                </div>
+                {restType === 'short' ? (
+                    <div className="space-y-6 text-center">
+                        <div className="flex flex-col items-center gap-2">
+                            <Heart className="text-red-500 w-12 h-12 animate-pulse" fill="currentColor" fillOpacity={0.2} />
+                            <div className="w-full bg-black/30 h-4 rounded-full overflow-hidden border border-white/10"><div className="h-full bg-red-600 transition-all duration-500" style={{ width: `${healthPct}%` }} /></div>
+                            <span className={`text-2xl font-black ${style.text}`}>{data.character.hp} <span className="text-sm font-normal opacity-50">/ {data.character.maxHp} HP</span></span>
+                        </div>
+                        <div className={`p-4 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center gap-3`}>
+                            <span className={`text-xs font-bold uppercase tracking-widest ${style.textDim}`}>Hit Dice (d{hitDieVal})</span>
+                            <div className="flex gap-1">{Array.from({ length: hitDiceMax }).map((_, i) => (<div key={i} className={`w-3 h-3 rounded-full border ${style.borderPrimary} ${i < hitDiceCurrent ? style.bgPrimary : 'opacity-20'}`} />))}</div>
+                            <span className={`${style.text} font-mono text-sm`}>{hitDiceCurrent} / {hitDiceMax} Available</span>
+                            {healRoll && (<div className="animate-in zoom-in text-green-400 font-bold text-lg mt-2">+{healRoll.total} HP <span className="text-xs opacity-50">({healRoll.roll} + {conMod})</span></div>)}
+                            <button onClick={handleRollHitDie} disabled={hitDiceCurrent <= 0 || healing || data.character.hp >= data.character.maxHp} className={`mt-2 w-full py-3 ${style.roundedBtn} font-bold flex items-center justify-center gap-2 ${hitDiceCurrent > 0 && data.character.hp < data.character.maxHp ? style.button : 'bg-white/5 text-white/20 cursor-not-allowed'}`}>{healing ? <Dices className="animate-spin"/> : <Heart size={18} />} Spend Hit Die</button>
+                        </div>
+                        {data.character.casterType === 'warlock' && <p className={`text-[10px] ${style.textDim}`}>* Warlock Pact Magic slots restore on Short Rest automatically.</p>}
+                    </div>
+                ) : (
+                    <div className="space-y-6 text-center py-4">
+                        <div className="flex justify-center mb-4"><Moon className="w-16 h-16 text-blue-300" /></div>
+                        <p className={`${style.textDim} text-sm leading-relaxed`}>Taking a Long Rest will restore all <strong>Hit Points</strong>, regain all <strong>Spell Slots</strong>, and recover up to half your total <strong>Hit Dice</strong>.</p>
+                        <button onClick={() => onRest('long')} className={`w-full py-4 ${style.roundedBtn} ${style.button} font-bold text-lg flex items-center justify-center gap-3`}><Tent /> Sleep (8 Hours)</button>
+                    </div>
+                )}
+                <button onClick={onClose} className={`absolute top-4 right-4 p-2 ${style.textDim} hover:text-white`}><X /></button>
+            </div>
+        </div>
+    );
+};
+
+const StatsPanel = ({ style, abilities, skills, level, editMode, onAbilityChange, onSkillToggle, onOpenRest, onOpenConditions, onRoll }) => {
+    const profBonus = getProficiencyBonus(level);
+    const rollStat = (key) => {
+        const rolls = Array.from({length: 4}, () => Math.floor(Math.random() * 6) + 1);
+        rolls.sort((a,b) => a-b); const total = rolls.slice(1).reduce((a,c) => a+c, 0); onAbilityChange(key, total);
+    };
+
+    return (
+        <div className={`w-full max-w-lg h-full max-h-[500px] flex flex-col gap-4 animate-in zoom-in duration-300 relative`}>
+            <div className="absolute -top-10 right-0 flex gap-2 z-10">
+                 <button onClick={onOpenConditions} className={`p-2 ${style.bgSoft} border ${style.borderPrimary} ${style.roundedBtn} flex items-center gap-2 text-xs font-bold shadow-xl ${style.text} hover:bg-black/20`}><Activity size={14} /> Conds</button>
+                 <button onClick={onOpenRest} className={`p-2 ${style.button} ${style.roundedBtn} flex items-center gap-2 text-xs font-bold shadow-xl`}><Tent size={14} /> Rest</button>
+            </div>
+            <div className="grid grid-cols-3 gap-2 flex-shrink-0 pt-1">
+                {ABILITIES.map((ability) => {
+                    const mod = getModifier(abilities[ability.key]);
+                    return (
+                        <div key={ability.key} className={`${style.bgPanel} ${style.roundedBtn} ${style.border} ${style.borderPrimary} p-2 flex flex-col items-center relative overflow-hidden group`}>
+                            {editMode && <button onClick={() => rollStat(ability.key)} className={`absolute top-1 right-1 p-1 opacity-50 hover:opacity-100 ${style.text}`}><Dices size={10} /></button>}
+                            <span className={`text-[9px] font-black uppercase tracking-widest ${style.textDim} mb-1`}>{ability.key}</span>
+                            <div className="flex items-baseline gap-1">
+                                {editMode ? (
+                                    <input type="number" value={abilities[ability.key]} onChange={(e) => onAbilityChange(ability.key, parseInt(e.target.value) || 10)} className={`w-12 text-center text-xl font-bold bg-black/20 ${style.roundedBtn} outline-none ${style.id === 'book' ? style.text : 'text-white'}`}/>
+                                ) : (<span className={`text-2xl font-black ${style.id === 'book' ? style.text : 'text-white'}`}>{abilities[ability.key]}</span>)}
+                            </div>
+                            <button onClick={() => onRoll(`${ability.label} Check`, mod)} className={`text-xs font-bold ${style.bgSoft} px-2 py-0.5 rounded-full mt-1 ${style.text} hover:scale-110 transition-transform cursor-pointer`}>{formatMod(mod)}</button>
+                        </div>
+                    );
+                })}
+            </div>
+            <div className={`flex justify-between items-center px-4 py-2 ${style.bgPanel} ${style.roundedBtn} ${style.border} ${style.borderPrimary}`}>
+                <div className="flex items-center gap-2"><Crown size={14} className={style.text} /><span className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Proficiency Bonus</span></div>
+                <span className={`font-bold font-mono text-lg ${style.text}`}>{formatMod(profBonus)}</span>
+            </div>
+            <div className={`flex-1 overflow-y-auto ${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} custom-scrollbar`}>
+                {SKILLS_LIST.map((skill) => {
+                    const attrMod = getModifier(abilities[skill.attr]);
+                    const profLevel = skills[skill.key] || 0;
+                    const totalMod = attrMod + (profLevel * profBonus);
+                    return (
+                        <div key={skill.key} className={`flex items-center justify-between p-2.5 border-b ${style.borderPrimary} last:border-0 hover:bg-black/5 transition-colors`}>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => onSkillToggle(skill.key)} className={`w-5 h-5 flex items-center justify-center transition-all duration-200 ${profLevel > 0 ? style.text : style.textDim} hover:scale-110`}>
+                                    {profLevel === 0 && <Circle size={16} strokeWidth={1.5} />}
+                                    {profLevel === 1 && <Disc size={16} strokeWidth={2.5} fill="currentColor" fillOpacity={0.2} />}
+                                    {profLevel === 2 && <Star size={16} strokeWidth={2.5} fill="currentColor" />}
+                                </button>
+                                <div>
+                                    <div className={`text-xs font-bold ${style.id === 'book' ? style.text : 'text-slate-200'}`}>{skill.label}</div>
+                                    <div className={`text-[9px] uppercase font-bold ${style.textDim}`}>{skill.attr.toUpperCase()}</div>
+                                </div>
+                            </div>
+                            <button onClick={() => onRoll(`${skill.label} Check`, totalMod)} className={`font-mono font-bold ${style.text} hover:scale-110 transition-transform cursor-pointer`}>{formatMod(totalMod)}</button>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
+const Header = ({ style, data, editMode, setEditMode, onHeaderClick, computedAC, onOpenDeathSaves, onOpenHealth }) => {
+  const activeConditions = Object.entries(data.conditions || {}).filter(([k, v]) => v && k !== 'exhaustion').length;
+  const exhaustion = data.conditions?.exhaustion || 0;
+  
+  // Logic Update: Only show Death Save UI if at 0 HP AND saves are not resolved (neither 3 successes nor 3 failures)
+  const isDying = data.character.hp <= 0 && (data.deathSaves?.successes || 0) < 3 && (data.deathSaves?.failures || 0) < 3;
+  
+  return (
+  <header onClick={onHeaderClick} className={`relative z-20 px-4 py-2 flex flex-col md:flex-row justify-between items-center transition-all duration-300 gap-2 md:gap-4 ${editMode ? 'cursor-pointer' : ''} ${style.bgPanel} border-b ${style.borderPrimary} ${style.border} shadow-sm border-x-0 border-t-0`}>
+    <div className="flex items-center gap-4 w-full md:w-auto">
+        <div className={`relative group flex-shrink-0`}>
+            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-full ${style.bgSoft} border-2 ${style.borderPrimary} flex items-center justify-center shadow-inner relative overflow-hidden`}>
+                 <span className={`text-xl font-bold ${style.text}`}>{data.character.name.charAt(0)}</span>
+                 {exhaustion > 0 && <div className="absolute inset-0 bg-orange-500/20 animate-pulse" />}
+            </div>
+            {(activeConditions > 0 || exhaustion > 0) && (
+                <div className="absolute -top-1 -right-1 flex gap-1">
+                    {activeConditions > 0 && <div className="w-3 h-3 bg-red-500 rounded-full border border-black" />}
+                    {exhaustion > 0 && <div className="w-3 h-3 bg-orange-500 rounded-full border border-black" />}
+                </div>
+            )}
+            {editMode && <div className={`absolute -bottom-1 -right-1 ${style.button} p-1 ${style.roundedBtn} shadow-md`}> <Edit3 size={8}/> </div>}
+        </div>
+        <div>
+            <h1 className={`font-bold text-lg md:text-xl tracking-tight flex items-center gap-2 ${style.id === 'book' ? style.text : 'text-white'}`}>{data.character.name} <span className={`text-[10px] font-normal ${style.textDim}`}>Lvl {data.character.level}</span> {editMode && <span className={`text-[8px] font-bold uppercase tracking-wider ${style.text} ${style.bgSoft} px-1.5 py-0.5 rounded border ${style.borderPrimary}`}>Edit Mode</span>}</h1>
+            <p className={`text-[10px] md:text-xs font-medium tracking-wide uppercase mt-0.5 ${style.textDim}`}>{data.character.class}</p>
+        </div>
+    </div>
+    <div className="flex items-center gap-4 w-full md:w-auto justify-end">
+        <div className="flex flex-col items-end mr-1 flex-grow md:flex-grow-0 cursor-pointer" onClick={isDying ? onOpenDeathSaves : onOpenHealth}>
+            <span className={`text-[9px] uppercase font-bold tracking-wider mb-1 mr-1 ${isDying ? 'text-red-500 animate-pulse' : style.textDim}`}>{isDying ? 'Death Saves' : 'Health'}</span>
+            <div className={`relative w-full md:w-48 h-4 ${style.healthBarBg} ${style.rounded} overflow-hidden ${isDying ? 'border-red-500/50' : ''}`}>
+                {isDying ? (
+                     <div className="absolute inset-0 flex items-center justify-center gap-3 bg-black/60">
+                         <div className="flex gap-0.5">{Array.from({length:3}).map((_,i) => <div key={i} className={`w-2 h-2 rounded-full ${i < (data.deathSaves?.successes||0) ? 'bg-green-500' : 'bg-gray-800'}`} />)}</div>
+                         <div className="flex gap-0.5">{Array.from({length:3}).map((_,i) => <div key={i} className={`w-2 h-2 rounded-full ${i < (data.deathSaves?.failures||0) ? 'bg-red-600' : 'bg-gray-800'}`} />)}</div>
+                     </div>
+                ) : (
+                    <>
+                        <div className={`absolute top-0 left-0 h-full ${style.healthBarFill} transition-all duration-300 ease-out`} style={{ width: `${Math.min(100, Math.max(0, (data.character.hp / data.character.maxHp) * 100))}%` }} />
+                        {(style.id === 'fantasy' || style.id === 'steampunk') && <div className="absolute top-0 left-0 right-0 h-[50%] bg-gradient-to-b from-white/10 to-transparent" />}
+                        <div className="absolute inset-0 flex items-center justify-center z-10"><span className={`text-[9px] font-bold font-mono tracking-wide ${style.id === 'book' ? 'text-black' : 'text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]'}`}>{data.character.hp} / {data.character.maxHp}</span></div>
+                    </>
+                )}
+            </div>
+        </div>
+        <div className="flex flex-col items-center"><span className={`text-[9px] uppercase font-bold tracking-wider mb-1 ${style.textDim}`}>AC</span><span className={`font-mono text-lg font-bold leading-none ${style.id === 'book' ? style.text : 'text-white'}`}>{computedAC}</span></div>
+        <button onClick={(e) => { e.stopPropagation(); setEditMode(!editMode); }} className={`ml-1 h-9 px-4 flex-shrink-0 transition-all flex items-center justify-center gap-2 ${style.roundedBtn} border-2 ${editMode ? `${style.button} border-white/20 shadow-[0_0_15px_rgba(255,255,255,0.3)] scale-105` : `border-white/10 bg-black/20 ${style.textDim} hover:border-white/30 hover:text-white`}`}>
+            {editMode ? <><Save size={16} strokeWidth={2.5} /><span className="text-xs font-bold uppercase tracking-wide">Save</span></> : <><Edit3 size={16} strokeWidth={2.5} /><span className="text-xs font-bold uppercase tracking-wide">Edit</span></>}
+        </button>
+    </div>
+  </header>
+  );
+};
+
+const ActionWheel = React.memo(({ style, items, selectedAction, hoveredAction, editMode, onSliceClick, onHover, onLeave }) => {
+    const wedges = useMemo(() => {
+        const totalSlots = Math.max(8, items ? items.length : 0);
+        const sliceAngle = 360 / totalSlots;
+        return Array.from({ length: totalSlots }).map((_, i) => {
+            const startAngle = i * sliceAngle;
+            const endAngle = (i + 1) * sliceAngle;
+            const midAngle = startAngle + (sliceAngle / 2);
+            return { index: i, path: createWedge(startAngle, endAngle), iconPos: getCoord(RADIUS_INNER + (RADIUS_OUTER - RADIUS_INNER) / 2, midAngle) };
+        });
+    }, [items]);
+
+    const handleKeyDown = (e, item) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSliceClick(item); } };
+    
+    return (
+        <div className="relative w-[280px] h-[280px] flex-shrink-0 animate-in zoom-in duration-500 flex items-center justify-center">
+            {style.id === 'fantasy' && <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[240px] h-[240px] rounded-full bg-${style.id === 'cyberpunk' ? style.primaryHex : 'white'}/5 blur-3xl`} />}
+            <svg viewBox={`0 0 ${WHEEL_SIZE} ${WHEEL_SIZE}`} className="w-full h-full drop-shadow-2xl relative z-10">
+                <circle cx={CENTER} cy={CENTER} r={RADIUS_INNER - 2} fill={style.wheelFillBase} stroke={style.primaryHex} strokeWidth="3" strokeOpacity="0.4" />
+                <circle cx={CENTER} cy={CENTER} r={RADIUS_INNER - 8} fill="none" stroke={style.primaryHex} strokeWidth="2" strokeDasharray="4 4" strokeOpacity="0.4" />
+                {wedges.map(({ index, path, iconPos }) => {
+                    const item = items ? items[index] : null;
+                    const isSelected = selectedAction && item && selectedAction.id === item.id;
+                    const isHovered = hoveredAction && item && hoveredAction.id === item.id;
+                    const IconComp = item ? (ICON_MAP[item.icon] || Sword) : Plus;
+                    return (
+                    <g key={index} onClick={() => onSliceClick(item)} onMouseEnter={() => onHover(item)} onMouseLeave={onLeave} onKeyDown={(e) => handleKeyDown(e, item)} role="button" tabIndex={0} className="cursor-pointer group outline-none" style={{ outline: 'none' }} >
+                        <path d={path} fill={item ? (isSelected ? style.primaryHex : isHovered ? style.wheelFillHover : style.wheelFillBase) : (editMode ? style.wheelFillBase : 'transparent')} stroke={item || editMode ? style.bgApp.split(' ')[0].replace('bg-', '') : "transparent"} strokeWidth="4" className="transition-all duration-300 ease-out focus:outline-none" style={{ stroke: item || editMode ? (style.id === 'book' ? '#e8dfc8' : '#0b0c15') : 'transparent', filter: isSelected && style.id !== 'book' ? `drop-shadow(0 0 10px ${style.primaryHex})` : 'none', transformOrigin: 'center', transform: isHovered && !isSelected ? 'scale(1.02)' : 'scale(1)' }} />
+                        {(item || (editMode && !item)) && (
+                            <foreignObject x={iconPos.x - 12} y={iconPos.y - 12} width="24" height="24" className="pointer-events-none overflow-visible" style={{ transform: (isHovered || isSelected) ? `scale(1.3)` : 'scale(1)', transformOrigin: `${iconPos.x}px ${iconPos.y}px`, transition: 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
+                                <div className="flex items-center justify-center w-full h-full">
+                                    {item ? <IconComp size={20} className={isSelected ? style.textInverse : isHovered ? style.textAccent : style.textDim} strokeWidth={2.5} /> : <Plus size={16} className={style.textDim} strokeWidth={3}/>}
+                                </div>
+                            </foreignObject>
+                        )}
+                    </g>
+                    );
+                })}
+            </svg>
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-28 h-28 flex items-center justify-center z-20 pointer-events-none">
+                {selectedAction ? (
+                    <div className="text-center animate-in zoom-in duration-300">
+                        <span className={`text-[10px] font-black uppercase tracking-widest leading-none ${style.id === 'book' ? style.text : 'text-white'}`}>{selectedAction.type}</span>
+                    </div>
+                ) : (<div className={`text-[10px] font-bold uppercase tracking-widest leading-tight text-center opacity-50 ${style.textDim}`}>Select<br/>Action</div>)}
+            </div>
+        </div>
+    );
+});
+
+const Spellbook = ({ style, items, selectedAction, editMode, onSliceClick, onAddNew, data, onStatChange }) => (
+    <div className={`w-full max-w-sm md:w-[320px] h-[350px] ${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} flex flex-col overflow-hidden animate-in zoom-in duration-300 ${style.shadow}`}>
+        <div className={`px-4 py-3 border-b-2 ${style.borderPrimary} flex justify-between items-center bg-black/5`}>
+            <div className="flex items-center gap-2">
+                <BookOpen size={14} className={style.text} strokeWidth={2.5}/>
+                <span className={`font-bold text-xs tracking-wide uppercase ${style.id === 'book' ? style.text : 'text-slate-200'}`}>Spellbook</span>
+            </div>
+            {editMode && <button onClick={onAddNew} className={`${style.button} px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 transition-all`}><Plus size={10} strokeWidth={3}/> Scribe</button>}
+        </div>
+        <div className={`grid grid-cols-2 gap-px bg-white/5 border-b-2 ${style.borderPrimary}`}>
+             <div className="p-2 flex flex-col items-center border-r border-white/5">
+                 <span className={`text-[9px] font-black uppercase tracking-widest ${style.textDim} mb-1 flex items-center gap-1`}><Shield size={10} /> Save DC</span>
+                 {editMode ? (
+                     <input type="number" value={data.character.spellSaveDC} onChange={(e) => onStatChange('spellSaveDC', parseInt(e.target.value)||10)} className={`w-12 text-center text-sm font-bold bg-black/20 ${style.roundedBtn} outline-none ${style.text}`} />
+                 ) : (<span className={`text-xl font-black ${style.text}`}>{data.character.spellSaveDC}</span>)}
+             </div>
+             <div className="p-2 flex flex-col items-center">
+                 <span className={`text-[9px] font-black uppercase tracking-widest ${style.textDim} mb-1 flex items-center gap-1`}><Target size={10} /> Attack</span>
+                 {editMode ? (
+                     <input type="number" value={data.character.spellAttackBonus} onChange={(e) => onStatChange('spellAttackBonus', parseInt(e.target.value)||0)} className={`w-12 text-center text-sm font-bold bg-black/20 ${style.roundedBtn} outline-none ${style.text}`} />
+                 ) : (<span className={`text-xl font-black ${style.text}`}>{formatMod(data.character.spellAttackBonus)}</span>)}
+             </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+            {(!items || items.length === 0) ? <div className={`h-full flex flex-col items-center justify-center space-y-2 opacity-50 ${style.textDim}`}><BookOpen size={24} /><span className="text-xs">No spells known</span></div> : null}
+            {items && items.map((item) => {
+                const IconComp = ICON_MAP[item.icon] || Zap;
+                const isSelected = selectedAction && selectedAction.id === item.id;
+                const levelDisplay = item.spellLevel && item.spellLevel > 0 ? `Lvl ${item.spellLevel}` : 'Cantrip';
+                const hasSlot = item.spellLevel && item.spellLevel > 0 && data.spellSlots[item.spellLevel]?.used < data.spellSlots[item.spellLevel]?.max;
+                return (
+                    <div key={item.id} onClick={() => onSliceClick(item)} className={`group p-2.5 ${style.roundedBtn} border-2 flex items-center gap-3 cursor-pointer transition-all duration-200 ${isSelected ? `${style.bgSoft} border-${style.primaryHex} ${style.shadow}` : `bg-transparent ${style.borderPrimary} hover:${style.bgSoft}`}`} style={{ borderColor: isSelected ? style.primaryHex : '' }}>
+                        <div className={`w-8 h-8 ${style.roundedBtn} flex items-center justify-center transition-colors ${isSelected ? style.button : `${style.bgSoft} ${style.textDim} group-hover:${style.text}`}`}><IconComp size={16} strokeWidth={2.5} /></div>
+                        <div className="flex-1 min-w-0">
+                            <h4 className={`font-bold text-xs truncate ${isSelected ? style.textAccent : style.text}`}>{item.name}</h4>
+                            <div className="flex items-center gap-2 mt-0.5">
+                                <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 ${style.rounded} ${item.spellLevel > 0 ? (hasSlot ? 'bg-blue-500/20 text-blue-300' : 'bg-red-500/20 text-red-300') : 'bg-black/5 text-slate-500'}`}>{levelDisplay}</span>
+                                {item.damage !== '-' && <span className={`text-[9px] font-mono ${style.text}`}>{item.damage}</span>}
+                            </div>
+                        </div>
+                    </div>
+                )
+            })}
+        </div>
+    </div>
+);
+
+const SpellSlotBar = ({ style, slots, editMode, onToggleSlot, onMaxSlotChange, casterType, level, sorceryPoints, onSorceryToggle }) => (
+    <div className={`w-full max-w-2xl px-4 pb-2 mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col gap-2`}>
+        {casterType === 'sorcerer' && (
+            <div className={`${style.bgPanel} ${style.borderPrimary} border-2 rounded-xl p-2 flex items-center justify-between`}>
+                <div className="flex items-center gap-2 px-2"><Sparkle size={14} className={style.text} /><span className={`text-[10px] font-bold uppercase tracking-wider ${style.textDim}`}>Sorcery Points</span></div>
+                <div className="flex gap-1 px-2">{Array.from({length: level}).map((_, i) => { const isActive = i < sorceryPoints; return (<button key={i} onClick={() => onSorceryToggle(i)} className={`w-3 h-3 rounded-full border ${style.borderPrimary} transition-all duration-200 ${isActive ? style.button : 'bg-black/50 opacity-30'}`} />) })}</div>
+            </div>
+        )}
+        <div className={`${style.bgPanel} ${style.borderPrimary} border-2 rounded-xl p-3 flex gap-4 overflow-x-auto scrollbar-hide snap-x`}>
+             {Object.entries(slots).map(([level, data]) => {
+                 if (data.max === 0 && !editMode) return null;
+                 const remaining = data.max - data.used;
+                 return (
+                 <div key={level} className="flex-shrink-0 flex flex-col items-center gap-1 snap-start min-w-[3rem]">
+                     <span className={`text-[9px] font-bold uppercase ${style.textDim}`}>{casterType === 'warlock' ? 'Pact' : `Lvl ${level}`}</span>
+                     <div className="flex gap-1 items-center">
+                        {editMode && <button onClick={() => onMaxSlotChange(level, -1)} className={`${style.textDim} hover:text-red-400`}><Minus size={12}/></button>}
+                        <div className="flex gap-1">
+                            {Array.from({length: data.max}).map((_, i) => (<button key={i} onClick={() => !editMode && onToggleSlot(level, i)} className={`w-3 h-3 rounded-full border ${style.borderPrimary} transition-all duration-300 ${i < remaining ? style.button : 'bg-black/50 opacity-30'}`} disabled={editMode} />))}
+                        </div>
+                        {editMode && <button onClick={() => onMaxSlotChange(level, 1)} className={`${style.textDim} hover:text-green-400`}><Plus size={12}/></button>}
+                     </div>
+                 </div>
+                 );
+             })}
+             {Object.values(slots).every(s => s.max === 0) && (<div className={`w-full text-center text-[10px] ${style.textDim} italic py-2`}>No Spell Slots available. Check class/level.</div>)}
+        </div>
+    </div>
+);
+
+const DetailsPanel = ({ style, selectedAction, lastRoll, setLastRoll, editMode, onUpdateItem, onRollAction, canUseSpellSlot }) => {
+    const handleToggle = (field) => { if(selectedAction && onUpdateItem) { onUpdateItem({ ...selectedAction, [field]: !selectedAction[field] }); } };
+    
+    const isSpell = selectedAction && (selectedAction.spellLevel !== undefined);
+    const requiredSlot = isSpell ? (selectedAction.spellLevel || 0) : 0;
+    const isCasting = requiredSlot > 0;
+    const hasSlot = canUseSpellSlot(requiredSlot);
+    const isPotion = selectedAction?.tag === 'potion';
+    const rollHandler = () => { if (isCasting && !hasSlot) return; onRollAction(selectedAction); };
+
+    return (
+    <div className={`w-full max-w-sm ${style.bgPanel} ${style.rounded} p-5 shadow-2xl min-h-[260px] flex flex-col relative overflow-hidden group ${style.border} ${style.borderPrimary}`}>
+        <div className={`absolute top-0 left-0 right-0 h-1.5 ${style.bgPrimary}`} />
+        {selectedAction ? (
+            <>
+                <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1 min-w-0">
+                        <h2 className={`text-xl font-bold mb-1 ${style.id === 'book' ? style.text : 'text-white'}`}>{selectedAction.name}</h2>
+                        <div className="flex flex-wrap gap-2">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${style.bgSoft} ${style.text} border-2 ${style.borderPrimary}`}>{selectedAction.tag || (isSpell ? (requiredSlot > 0 ? `Lvl ${requiredSlot} Spell` : 'Cantrip') : selectedAction.type)}</span>
+                            {selectedAction.qty !== undefined && (<><button onClick={() => handleToggle('equipped')} className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase border-2 transition-colors ${selectedAction.equipped ? `${style.bgPrimary} text-white border-transparent` : `border-white/10 ${style.textDim} hover:text-white`}`}><Shield size={10}/> {selectedAction.equipped ? 'Equipped' : 'Equip'}</button>{(selectedAction.tag === 'magic' || selectedAction.tag === 'weapon' || selectedAction.tag === 'armor' || selectedAction.tag === 'shield') && (<button onClick={() => handleToggle('attuned')} className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase border-2 transition-colors ${selectedAction.attuned ? `bg-purple-600 text-white border-transparent` : `border-white/10 ${style.textDim} hover:text-purple-400`}`}><LinkIcon size={10}/> {selectedAction.attuned ? 'Attuned' : 'Attune'}</button>)}</>)}
+                        </div>
+                    </div>
+                    {selectedAction.damage && selectedAction.damage !== '-' && (<div className="text-right flex-shrink-0 ml-2"><div className={`text-[9px] uppercase font-bold tracking-wider mb-0.5 ${style.textDim}`}>{isPotion ? 'Healing' : 'Damage'}</div><div className={`text-lg font-mono font-bold ${style.text}`}>{selectedAction.damage}</div></div>)}
+                </div>
+                <div className={`flex-1 leading-relaxed text-xs font-medium mb-4 overflow-y-auto max-h-24 custom-scrollbar ${style.id === 'book' ? style.text : 'text-slate-300'}`}>{selectedAction.desc}</div>
+                <div className="mt-auto">
+                    <div className={`relative overflow-hidden ${style.roundedBtn} border-2 ${style.borderPrimary} ${style.bgSoft} transition-colors`}>
+                            {!lastRoll ? (
+                            <button onClick={rollHandler} disabled={isCasting && !hasSlot} className={`w-full py-3 flex items-center justify-center gap-3 transition-all duration-300 group/btn ${isCasting && !hasSlot ? 'bg-red-900/10 text-red-500 cursor-not-allowed' : `hover:${style.bgPrimary}`}`}><Dices className={`w-5 h-5 ${style.text} group-hover/btn:${style.textInverse} transition-colors`} strokeWidth={2.5}/><span className={`font-bold uppercase tracking-widest text-xs ${style.text} group-hover/btn:${style.textInverse}`}>{isCasting && !hasSlot ? 'No Slot Available' : isPotion ? 'Roll Healing' : (selectedAction.damage === '-' ? 'Roll Check' : `Roll ${selectedAction.damage || 'Check'}`)}</span></button>
+                            ) : (
+                            <div onClick={() => setLastRoll(null)} className="py-3 cursor-pointer hover:bg-black/5 transition-colors"><DiceRoller formula={lastRoll} style={style} /><div className={`text-center text-[9px] mt-1 ${style.textDim}`}>Click to reset</div></div>
+                            )}
+                    </div>
+                </div>
+            </>
+        ) : (<div className={`flex-1 flex flex-col items-center justify-center ${style.textDim}`}><Hand className="w-10 h-10 mb-3 opacity-20" strokeWidth={1.5}/><p className="text-xs font-medium">Select an action to view details</p></div>)}
+    </div>
+    );
+};
+
+const NotesPanel = ({ style, story, notes, onUpdateStory, onAddNote, onDeleteNote, onUpdateNote }) => {
+    return (
+        <div className={`w-full max-w-4xl h-full max-h-[600px] flex flex-col md:flex-row gap-4 animate-in zoom-in duration-300`}>
+            {/* Left Column: Background Info */}
+            <div className={`flex-1 ${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar`}>
+                <h3 className={`font-bold text-lg border-b ${style.borderPrimary} pb-2 ${style.id === 'book' ? style.text : 'text-white'}`}>Background & Lore</h3>
+                {['background', 'motivations', 'connections'].map(field => (
+                    <div key={field} className="space-y-1">
+                        <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>{field}</label>
+                        <textarea
+                            value={story[field] || ''}
+                            onChange={(e) => onUpdateStory(field, e.target.value)}
+                            className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-3 ${style.id === 'book' ? style.text : 'text-slate-300'} outline-none min-h-[100px] text-sm leading-relaxed resize-y focus:border-${style.primaryHex} transition-colors`}
+                            placeholder={`Write character ${field}...`}
+                        />
+                    </div>
+                ))}
+            </div>
+
+            {/* Right Column: Quick Notes */}
+            <div className={`flex-1 ${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} p-4 flex flex-col gap-3 overflow-hidden`}>
+                <div className={`flex justify-between items-center border-b ${style.borderPrimary} pb-2`}>
+                     <h3 className={`font-bold text-lg ${style.id === 'book' ? style.text : 'text-white'}`}>Quick Notes</h3>
+                     <button onClick={onAddNote} className={`${style.button} p-1.5 rounded-full`}><Plus size={14}/></button>
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1">
+                    {notes.map(note => (
+                        <div key={note.id} className={`p-3 ${style.roundedBtn} border ${style.borderPrimary} bg-black/5 relative group`}>
+                             <input
+                                type="text"
+                                value={note.title}
+                                onChange={(e) => onUpdateNote(note.id, 'title', e.target.value)}
+                                className={`w-full bg-transparent font-bold text-sm mb-1 outline-none ${style.textAccent}`}
+                                placeholder="Note Title"
+                             />
+                             <textarea
+                                value={note.text}
+                                onChange={(e) => onUpdateNote(note.id, 'text', e.target.value)}
+                                className={`w-full bg-transparent text-xs ${style.textDim} outline-none resize-none h-auto min-h-[60px]`}
+                                placeholder="Note details..."
+                             />
+                             <button onClick={() => onDeleteNote(note.id)} className={`absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-300`}><Trash2 size={12}/></button>
+                        </div>
+                    ))}
+                    {notes.length === 0 && <div className={`text-center py-10 ${style.textDim} text-xs italic`}>No notes yet.</div>}
+                </div>
+            </div>
+        </div>
+    )
+}
+
+const EditSlotModal = ({ style, form, setForm, onClose, onSave, onDelete, isExisting, category }) => {
+    if (!form) return null; 
+    const isItem = category === 'items';
+    const isArmor = isItem && (form.tag === 'armor' || form.tag === 'magic' || form.tag === 'shield');
+    const isFeature = category === 'features';
+
+    return (
+    <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className={`${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} w-full max-w-md p-6 ${style.shadow} animate-in zoom-in duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar`}>
+            <div className={`flex justify-between items-center mb-6 border-b-2 ${style.borderPrimary} pb-4`}>
+                <h3 className={`text-lg font-bold flex items-center gap-2 ${style.id === 'book' ? style.text : 'text-white'}`}><Edit3 size={16} className={style.text} strokeWidth={2.5}/>{isExisting ? 'Edit Slot' : 'New Slot'}</h3>
+                <button onClick={onClose} className={`${style.textDim} hover:${style.id === 'book' ? style.text : 'text-white'}`}><X strokeWidth={2.5} /></button>
+            </div>
+            <form onSubmit={onSave} className="space-y-5">
+                <div className="space-y-1">
+                    <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Name</label>
+                    <input type="text" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} focus:border-${style.primaryHex} outline-none transition-colors text-sm font-bold`}/>
+                </div>
+                {isFeature && (
+                    <div className="grid grid-cols-2 gap-4 bg-black/10 p-3 rounded-xl border border-white/5">
+                        <div className="col-span-2 flex items-center gap-3">
+                            <input type="checkbox" id="hasResource" checked={form.hasResource || false} onChange={e => setForm({...form, hasResource: e.target.checked})} className="w-4 h-4 text-amber-600 bg-black/20 border-white/20 rounded focus:ring-amber-500" />
+                            <label htmlFor="hasResource" className={`text-xs uppercase font-bold tracking-wider ${style.textDim}`}>Has Resource Counter?</label>
+                        </div>
+                        {form.hasResource && (
+                            <div className="space-y-1">
+                                <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Max Uses</label>
+                                <input type="number" value={form.maxUses || 0} onChange={e => setForm({...form, maxUses: parseInt(e.target.value) || 0, currentUses: parseInt(e.target.value) || 0})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm font-mono`}/>
+                            </div>
+                        )}
+                    </div>
+                )}
+                <div className="grid grid-cols-2 gap-4">
+                    {isItem ? (
+                        <>
+                            <div className="space-y-1">
+                                <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Tag / Type</label>
+                                <select value={form.tag || 'misc'} onChange={e => setForm({...form, tag: e.target.value})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm`}>{ITEM_TAGS.map(t => <option key={t.id} value={t.id} className="bg-black">{t.label}</option>)}</select>
+                            </div>
+                            <div className="space-y-1">
+                                <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Quantity</label>
+                                <input type="number" value={form.qty || 1} onChange={e => setForm({...form, qty: parseInt(e.target.value) || 1})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm font-mono`}/>
+                            </div>
+                            {isArmor && (
+                                <>
+                                    <div className="space-y-1">
+                                        <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>{form.tag === 'shield' ? 'AC Bonus' : 'Armor Value (+ to 10)'}</label>
+                                        <input type="number" value={form.acBase !== undefined ? form.acBase : (form.tag === 'shield' ? 0 : 2)} onChange={e => setForm({...form, acBase: parseInt(e.target.value) || 0})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm font-mono`}/>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Max Dex (0 for Heavy, 2 Med, 99 Light)</label>
+                                        <input type="number" value={form.acMaxDex !== undefined ? form.acMaxDex : (form.tag === 'shield' ? 0 : 99)} onChange={e => setForm({...form, acMaxDex: parseInt(e.target.value)})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm font-mono`}/>
+                                    </div>
+                                    <div className="col-span-2 space-y-1">
+                                        <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Misc Bonus (e.g. +1 magic)</label>
+                                        <input type="number" value={form.acBonus || 0} onChange={e => setForm({...form, acBonus: parseInt(e.target.value) || 0})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm font-mono`}/>
+                                    </div>
+                                    <div className="col-span-2 flex items-center gap-3">
+                                        <input type="checkbox" id="isShield" checked={form.isShield || false} onChange={e => setForm({...form, isShield: e.target.checked})} className="w-4 h-4 text-amber-600 bg-black/20 border-white/20 rounded focus:ring-amber-500" />
+                                        <label htmlFor="isShield" className={`text-xs uppercase font-bold tracking-wider ${style.textDim}`}>Is Shield (+2 AC Base)</label>
+                                    </div>
+                                </>
+                            )}
+                            {form.tag === 'potion' && (<div className="col-span-2 space-y-1"><label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Healing Amount</label><input type="text" value={form.damage || ''} placeholder="e.g. 2d4+2" onChange={e => setForm({...form, damage: e.target.value})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm font-mono`}/></div>)}
+                        </>
+                    ) : (
+                        <>
+                            <div className="space-y-1">
+                                <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Type</label>
+                                <input type="text" value={form.type} onChange={e => setForm({...form, type: e.target.value})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm`}/>
+                            </div>
+                            <div className="space-y-1">
+                                <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Damage</label>
+                                <input type="text" value={form.damage} placeholder="e.g. 1d8+3" onChange={e => setForm({...form, damage: e.target.value})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm font-mono`}/>
+                            </div>
+                        </>
+                    )}
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    {category === 'spells' && (<div className="space-y-1"><label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Spell Level</label><input type="number" min="0" max="9" value={form.spellLevel || 0} onChange={e => setForm({...form, spellLevel: parseInt(e.target.value) || 0})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm font-mono`}/></div>)}
+                </div>
+                <div className="space-y-1">
+                    <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Icon</label>
+                    <div className="flex flex-wrap gap-2">{Object.keys(ICON_MAP).map(iconKey => (<button key={iconKey} type="button" onClick={() => setForm({...form, icon: iconKey})} className={`p-2 ${style.roundedBtn} border-2 transition-all ${form.icon === iconKey ? style.button : `bg-transparent ${style.borderPrimary} ${style.textDim} hover:${style.bgSoft}`}`}>{React.createElement(ICON_MAP[iconKey], { size: 16, strokeWidth: 2.5 })}</button>))}</div>
+                </div>
+                <div className="space-y-1">
+                    <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Description</label>
+                    <textarea value={form.desc} onChange={e => setForm({...form, desc: e.target.value})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-3 ${style.id === 'book' ? style.text : 'text-slate-300'} outline-none h-24 resize-none text-sm leading-relaxed`}/>
+                </div>
+                <div className="flex gap-3 pt-2">
+                    {isExisting && <button type="button" onClick={onDelete} className={`px-4 py-2.5 bg-red-500/10 text-red-500 border-2 border-red-500/20 ${style.roundedBtn} hover:bg-red-500/20 transition-colors`}><Trash2 size={18} strokeWidth={2.5} /></button>}
+                    <button type="submit" className={`flex-1 ${style.button} font-bold py-2.5 ${style.roundedBtn} transition-all`}>Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    );
+};
+
+const CharacterModal = ({ style, form, setForm, onClose, onSave }) => {
+    const NumberInput = ({ label, val, field }) => (
+        <div className="space-y-1">
+            <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>{label}</label>
+            <input type="number" value={val} onChange={e => setForm({...form, [field]: parseInt(e.target.value) || 0})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm font-mono text-center`}/>
+        </div>
+    );
+
+    return (
+        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+             <div className={`${style.bgPanel} ${style.rounded} ${style.border} ${style.borderPrimary} w-full max-w-md p-6 ${style.shadow} animate-in zoom-in duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar`}>
+                <div className={`flex justify-between items-center mb-6 border-b-2 ${style.borderPrimary} pb-4`}>
+                    <h3 className={`text-lg font-bold flex items-center gap-2 ${style.id === 'book' ? style.text : 'text-white'}`}><User size={16} className={style.text} strokeWidth={2.5}/> Character Stats</h3>
+                    <button onClick={onClose} className={`${style.textDim} hover:${style.id === 'book' ? style.text : 'text-white'}`}><X strokeWidth={2.5} /></button>
+                </div>
+                <form onSubmit={onSave} className="space-y-5">
+                    <div className={`space-y-2 pb-4 border-b-2 ${style.borderPrimary}`}>
+                        <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Theme</label>
+                        <div className="grid grid-cols-4 gap-2">{['fantasy', 'book', 'cyberpunk', 'steampunk'].map(key => (<button key={key} type="button" onClick={() => setForm({...form, design: key})} className={`h-16 ${style.roundedBtn} border-2 flex flex-col items-center justify-center transition-all gap-1 ${form.design === key ? `${style.bgSoft} border-current shadow-[0_0_5px_currentColor]` : `bg-black/10 ${style.borderPrimary} opacity-60 hover:opacity-100`}`} style={{ borderColor: form.design === key ? style.primaryHex : '' }}><span className={`text-[9px] font-bold ${form.design === key ? style.text : style.textDim}`}>{key}</span></button>))}</div>
+                    </div>
+                    <div className={`space-y-2 pb-4 border-b-2 ${style.borderPrimary}`}>
+                         <label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Accent</label>
+                         <div className="grid grid-cols-4 gap-2">{Object.entries(COLOR_VARIANTS).map(([key, val]) => (<button key={key} type="button" onClick={() => setForm({...form, color: key})} className={`h-10 ${style.roundedBtn} border-2 flex items-center justify-center transition-all ${form.color === key ? `${style.bgSoft} border-current shadow-[0_0_5px_currentColor]` : `bg-black/10 ${style.borderPrimary} opacity-60 hover:opacity-100`}`} style={{ color: val.hex, borderColor: form.color === key ? val.hex : '' }}><div className={`w-4 h-4 rounded-full`} style={{ backgroundColor: val.hex }} /></button>))}</div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2"><label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Caster Class</label><select value={form.casterType || 'none'} onChange={e => setForm({...form, casterType: e.target.value})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm`}>{CASTER_CLASSES.map(c => <option key={c.value} value={c.value} className="bg-black text-white">{c.label}</option>)}</select></div>
+                        <div className="space-y-2"><label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Hit Die</label><select value={form.hitDie || 8} onChange={e => setForm({...form, hitDie: parseInt(e.target.value)})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm`}>{HIT_DICE_OPTIONS.map(c => <option key={c.value} value={c.value} className="bg-black text-white">{c.label}</option>)}</select></div>
+                    </div>
+                    <div className="space-y-1"><label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Name</label><input type="text" required value={form.name} onChange={e => setForm({...form,name: e.target.value})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} focus:border-${style.primaryHex} outline-none transition-colors text-sm font-bold`}/></div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1"><label className={`text-[10px] uppercase font-bold tracking-wider ${style.textDim}`}>Class Title</label><input type="text" value={form.class} onChange={e => setForm({...form, class: e.target.value})} className={`w-full bg-black/10 border-2 ${style.borderPrimary} ${style.roundedBtn} p-2.5 ${style.id === 'book' ? style.text : 'text-white'} outline-none text-sm`}/></div>
+                         <NumberInput label="Level" val={form.level} field="level" />
+                    </div>
+                    <div className="flex gap-2">
+                        <NumberInput label="Current HP" val={form.hp} field="hp" />
+                        <NumberInput label="Max HP" val={form.maxHp} field="maxHp" />
+                    </div>
+                    <div className='text-xs italic text-slate-500/80 pt-2'>AC is calculated automatically based on equipped armor and shield.</div>
+                    <button type="submit" className={`w-full mt-2 ${style.button} font-bold py-3 ${style.roundedBtn} transition-all`}>Update Character</button>
+                </form>
+             </div>
+        </div>
+    );
+};
+
+export default function App() {
+  const [data, setData] = useState(() => {
+    const saved = localStorage.getItem('rpg-interface-data-v18'); // UPDATED TO V18
+    let loadedData;
+    try {
+        loadedData = saved ? JSON.parse(saved) : INITIAL_DATA;
+    } catch (e) {
+        loadedData = INITIAL_DATA;
+    }
+    
+    // Data Integrity Check
+    if (!loadedData.categories) loadedData.categories = INITIAL_DATA.categories;
+    if (!loadedData.categories.items) loadedData.categories.items = INITIAL_DATA.categories.items;
+    if (!loadedData.categories.features) loadedData.categories.features = INITIAL_DATA.categories.features || [];
+    if (!loadedData.categories.bonus) loadedData.categories.bonus = INITIAL_DATA.categories.bonus || []; // Ensure bonus exists
+    if (!loadedData.abilities) loadedData.abilities = INITIAL_DATA.abilities;
+    if (!loadedData.character) loadedData.character = INITIAL_DATA.character;
+    if (!loadedData.story) loadedData.story = INITIAL_DATA.story;
+    if (!loadedData.notes) loadedData.notes = INITIAL_DATA.notes;
+    if (!loadedData.conditions) loadedData.conditions = INITIAL_DATA.conditions;
+    if (!loadedData.deathSaves) loadedData.deathSaves = INITIAL_DATA.deathSaves;
+
+    loadedData.spellSlots = calculateSpellSlots(loadedData.character.casterType, loadedData.character.level);
+    return loadedData;
+  });
+  
+  const [activeCategory, setActiveCategory] = useState('stats');
+  const [selectedAction, setSelectedAction] = useState(null);
+  const [hoveredAction, setHoveredAction] = useState(null);
+  const [editMode, setEditMode] = useState(false);
+  const [lastRoll, setLastRoll] = useState(null);
+  const [isEditingSlot, setIsEditingSlot] = useState(false);
+  const [editForm, setEditForm] = useState(null);
+  const [isEditingCharacter, setIsEditingCharacter] = useState(false);
+  const [isResting, setIsResting] = useState(false);
+  const [isConditionsOpen, setIsConditionsOpen] = useState(false);
+  const [isDeathSavesOpen, setIsDeathSavesOpen] = useState(false);
+  const [isHealthOpen, setIsHealthOpen] = useState(false);
+  const [characterForm, setCharacterForm] = useState(data.character);
+  const [activeRoll, setActiveRoll] = useState(null);
+
+  useEffect(() => {
+    localStorage.setItem('rpg-interface-data-v18', JSON.stringify(data)); // UPDATED TO V18
+  }, [data]);
+  
+  useEffect(() => {
+      // Auto-open death save modal when HP drops to 0
+      if (data.character.hp <= 0 && !isDeathSavesOpen && data.deathSaves.successes < 3 && data.deathSaves.failures < 3) {
+          setIsDeathSavesOpen(true);
+      }
+      // Reset death saves when HP > 0
+      if (data.character.hp > 0 && (data.deathSaves.successes > 0 || data.deathSaves.failures > 0)) {
+          setData(prev => ({ ...prev, deathSaves: { successes: 0, failures: 0 } }));
+      }
+  }, [data.character.hp]);
+
+  const style = useMemo(() => getThemeStyles(data.character.design || 'fantasy', data.character.color || 'amber'), [data.character.design, data.character.color]);
+  const currentItems = useMemo(() => data.categories && data.categories[activeCategory] ? data.categories[activeCategory] : [], [data.categories, activeCategory]);
+  
+  const computedAC = useMemo(() => {
+      // Safe check for undefined items
+      return calculateAC(data.abilities, data.categories?.items || []);
+  }, [data.abilities, data.categories]);
+
+  // Handler Definitions moved up for scope safety
+  const handleAbilityChange = (key, val) => setData(prev => ({ ...prev, abilities: { ...prev.abilities, [key]: val } }));
+  
+  const canUseSpellSlot = useCallback((requiredLevel) => {
+    if (requiredLevel === 0) return true;
+    const slot = data.spellSlots[requiredLevel];
+    return slot && (slot.max - slot.used) > 0;
+  }, [data.spellSlots]);
+
+  const handleDrainSlot = useCallback((level) => {
+      if (level === 0) return; 
+      setData(prev => {
+          const newSlots = { ...prev.spellSlots };
+          const slot = newSlots[level];
+          if (slot && slot.used < slot.max) {
+              newSlots[level] = { ...slot, used: slot.used + 1 };
+              return { ...prev, spellSlots: newSlots };
+          }
+          return prev;
+      });
+  }, []);
+
+  const handleRollAction = (action) => {
+      setLastRoll(action.damage === '-' ? '1d20' : action.damage);
+      if (action.spellLevel && action.spellLevel > 0 && canUseSpellSlot(action.spellLevel)) {
+          handleDrainSlot(action.spellLevel);
+      }
+      if (action.tag === 'potion') {
+          handleUpdateItem({ ...action, qty: Math.max(0, (action.qty || 1) - 1) });
+      }
+  };
+
+  const handleSliceClick = useCallback((action) => {
+    if (editMode && activeCategory !== 'stats' && activeCategory !== 'notes') {
+      const defaultType = activeCategory === 'bonus' ? 'Bonus Action' : 'Action';
+      const defaultItem = activeCategory === 'items' 
+        ? { id: Date.now(), name: 'New Item', icon: 'misc', type: 'Item', damage: '-', desc: 'Description here.', tag: 'misc', qty: 1, equipped: false, attuned: false, acBase: 0, acMaxDex: 99, acBonus: 0, isShield: false } 
+        : { id: Date.now(), name: `New ${defaultType}`, icon: 'sword', type: defaultType, damage: '1d6', desc: 'Description here.', spellLevel: 0 };
+      setEditForm(action || defaultItem);
+      setIsEditingSlot(true);
+    } else if (action) {
+      setSelectedAction(action);
+      setLastRoll(null);
+    }
+  }, [editMode, activeCategory]);
+
+  const handleSaveEdit = (e) => {
+    e.preventDefault();
+    setData(prev => {
+        const list = [...prev.categories[activeCategory]];
+        const idx = list.findIndex(x => x.id === editForm.id);
+        if (idx >= 0) list[idx] = editForm; else list.push(editForm);
+        return { ...prev, categories: { ...prev.categories, [activeCategory]: list } };
+    });
+    setIsEditingSlot(false); setEditForm(null);
+  };
+
+  const handleDeleteSlot = () => {
+    setData(prev => ({ ...prev, categories: { ...prev.categories, [activeCategory]: prev.categories[activeCategory].filter(x => x.id !== editForm.id) } }));
+    setIsEditingSlot(false); setEditForm(null); setSelectedAction(null);
+  };
+
+  const handleUpdateItem = (updatedItem) => {
+      setData(prev => {
+          // Determine correct category array to update based on item context or fallback to active
+          const categoryKey = activeCategory === 'features' ? 'features' : (activeCategory === 'items' ? 'items' : activeCategory);
+          const list = [...prev.categories[categoryKey]];
+          
+          // Special handling if updating a feature from FeaturesPanel while in features tab
+          const idx = list.findIndex(x => x.id === updatedItem.id);
+          if (idx >= 0) {
+              list[idx] = updatedItem;
+              if(selectedAction && selectedAction.id === updatedItem.id) {
+                  setSelectedAction(updatedItem);
+              }
+          }
+          return { ...prev, categories: { ...prev.categories, [categoryKey]: list } };
+      });
+  };
+  
+  const handleSkillToggle = (key) => {
+      if(!editMode) return;
+      setData(prev => {
+          const current = prev.skills[key] || 0;
+          const next = current >= 2 ? 0 : current + 1;
+          return { ...prev, skills: { ...prev.skills, [key]: next } };
+      });
+  };
+
+  const handleToggleSpellSlot = (level, index) => {
+      setData(prev => {
+          const slot = prev.spellSlots[level];
+          const currentRemaining = slot.max - slot.used;
+          let newRemaining;
+          if (index < currentRemaining) {
+              newRemaining = index;
+          } else {
+              newRemaining = index + 1;
+          }
+          const newUsed = slot.max - newRemaining;
+          return { ...prev, spellSlots: { ...prev.spellSlots, [level]: { ...slot, used: newUsed } } };
+      });
+  };
+
+  const handleMaxSlotChange = (level, delta) => {
+      setData(prev => {
+          const current = prev.spellSlots[level] || { max: 0, used: 0 };
+          const newMax = Math.max(0, current.max + delta);
+          return { ...prev, spellSlots: { ...prev.spellSlots, [level]: { ...current, max: newMax } } };
+      });
+  };
+
+  const handleStatChange = (key, val) => setData(prev => ({ ...prev, character: { ...prev.character, [key]: val } }));
+  
+  const handleSorceryToggle = (index) => {
+      setData(prev => {
+          const current = prev.sorceryPoints || 0;
+          let next = index < current ? index : index + 1;
+          return { ...prev, sorceryPoints: next };
+      });
+  };
+
+  const handleUpdateCurrency = (key, val) => setData(prev => ({ ...prev, currency: { ...prev.currency, [key]: val }}));
+  
+  const handleCharacterSave = (e) => {
+      e.preventDefault();
+      const newSlots = calculateSpellSlots(characterForm.casterType, characterForm.level);
+      setData(prev => ({ ...prev, character: characterForm, spellSlots: newSlots, sorceryPoints: characterForm.casterType === 'sorcerer' ? characterForm.level : 0 }));
+      setIsEditingCharacter(false);
+  };
+
+  const handleRest = (type, healAmount = 0) => {
+      if (type === 'short') {
+          setData(prev => {
+              const newHp = Math.min(prev.character.maxHp, prev.character.hp + healAmount);
+              const newHitDice = Math.max(0, (prev.character.hitDiceCurrent !== undefined ? prev.character.hitDiceCurrent : prev.character.level) - 1);
+              let newSlots = { ...prev.spellSlots };
+              if (prev.character.casterType === 'warlock') { Object.keys(newSlots).forEach(lvl => { newSlots[lvl] = { ...newSlots[lvl], used: 0 }; }); }
+              return { ...prev, character: { ...prev.character, hp: newHp, hitDiceCurrent: newHitDice }, spellSlots: newSlots };
+          });
+      } else if (type === 'long') {
+          setData(prev => {
+              let newSlots = { ...prev.spellSlots };
+              Object.keys(newSlots).forEach(lvl => { newSlots[lvl] = { ...newSlots[lvl], used: 0 }; });
+              const maxHD = prev.character.level;
+              const currentHD = prev.character.hitDiceCurrent !== undefined ? prev.character.hitDiceCurrent : maxHD;
+              const regainedHD = Math.max(1, Math.floor(maxHD / 2));
+              const newHD = Math.min(maxHD, currentHD + regainedHD);
+              return { ...prev, character: { ...prev.character, hp: prev.character.maxHp, hitDiceCurrent: newHD }, spellSlots: newSlots, sorceryPoints: prev.character.casterType === 'sorcerer' ? prev.character.level : 0, conditions: { ...prev.conditions, exhaustion: Math.max(0, (prev.conditions?.exhaustion || 0) - 1) } };
+          });
+          setIsResting(false);
+      }
+  };
+  
+  const handleRoll = (title, mod) => setActiveRoll({ title, mod });
+  const handleUpdateStory = (field, value) => setData(prev => ({ ...prev, story: { ...prev.story, [field]: value } }));
+  const handleAddNote = () => setData(prev => ({ ...prev, notes: [{ id: Date.now(), title: 'New Note', text: '' }, ...(prev.notes || [])] }));
+  const handleUpdateNote = (id, field, value) => setData(prev => ({ ...prev, notes: prev.notes.map(n => n.id === id ? { ...n, [field]: value } : n) }));
+  const handleDeleteNote = (id) => setData(prev => ({ ...prev, notes: prev.notes.filter(n => n.id !== id) }));
+  const handleToggleCondition = (id) => setData(prev => ({ ...prev, conditions: { ...prev.conditions, [id]: !prev.conditions?.[id] } }));
+  const handleSetExhaustion = (val) => setData(prev => ({ ...prev, conditions: { ...prev.conditions, exhaustion: val } }));
+  const handleCommitDeathSave = (roll) => {
+      setData(prev => {
+          let { successes, failures } = prev.deathSaves;
+          let newHp = prev.character.hp;
+          
+          if (roll === 20) {
+              newHp = 1; // Stabilize immediately
+              successes = 0; failures = 0;
+          } else if (roll === 1) {
+              failures += 2;
+          } else if (roll >= 10) {
+              successes += 1;
+          } else {
+              failures += 1;
+          }
+          return { ...prev, character: { ...prev.character, hp: newHp }, deathSaves: { successes, failures } };
+      });
+  };
+  const handleStabilize = () => setData(prev => ({ ...prev, deathSaves: { successes: 3, failures: prev.deathSaves.failures } }));
+  const handleHealthUpdate = (type, amount) => {
+      setData(prev => {
+          let newHp = prev.character.hp;
+          if (type === 'heal') newHp = Math.min(prev.character.maxHp, newHp + amount);
+          else newHp = Math.max(0, newHp - amount);
+          return { ...prev, character: { ...prev.character, hp: newHp } };
+      });
+  };
+
+  return (
+    <div className={`min-h-screen ${style.bgApp} ${style.font} overflow-hidden flex flex-col relative transition-colors duration-500`} style={style.appBgStyle}>
+      <AnimationStyles />
+      {data.character.design === 'fantasy' && (<><div className={`absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,var(--tw-gradient-stops))] from-slate-900/40 via-transparent to-black z-0`} /><div className="absolute inset-0 opacity-[0.03] bg-[url('https://grainy-gradients.vercel.app/noise.svg')] z-0 pointer-events-none" /></>)}
+      <Header style={style} data={data} computedAC={computedAC} editMode={editMode} setEditMode={setEditMode} onHeaderClick={() => { if(editMode) { setCharacterForm(data.character); setIsEditingCharacter(true); }}} onOpenDeathSaves={() => setIsDeathSavesOpen(true)} onOpenHealth={() => setIsHealthOpen(true)} />
+      <main className="relative z-10 flex-1 flex flex-col md:flex-row items-center justify-center gap-4 p-2 overflow-y-auto">
+        {activeCategory === 'spells' ? (
+            <Spellbook style={style} items={currentItems} selectedAction={selectedAction} editMode={editMode} onSliceClick={handleSliceClick} onAddNew={() => { setEditForm({ id: Date.now(), name: 'New Spell', icon: 'zap', type: 'Spell', damage: '1d6', desc: 'Spell description.', spellLevel: 1 }); setIsEditingSlot(true); }} data={data} onStatChange={handleStatChange} />
+        ) : activeCategory === 'features' ? (
+            <FeaturesPanel style={style} items={currentItems} selectedAction={selectedAction} editMode={editMode} onSliceClick={handleSliceClick} onAddNew={() => { setEditForm({ id: Date.now(), name: 'New Feature', icon: 'bulb', type: 'Feature', damage: '-', desc: 'Description here.', hasResource: false, maxUses: 0, currentUses: 0 }); setIsEditingSlot(true); }} onUpdateItem={handleUpdateItem} />
+        ) : activeCategory === 'stats' ? (
+            <StatsPanel style={style} abilities={data.abilities} skills={data.skills} level={data.character.level} editMode={editMode} onAbilityChange={handleAbilityChange} onSkillToggle={handleSkillToggle} onOpenRest={() => setIsResting(true)} onOpenConditions={() => setIsConditionsOpen(true)} onRoll={handleRoll} />
+        ) : activeCategory === 'items' ? (
+            <InventoryPanel style={style} items={currentItems} currency={data.currency || {}} editMode={editMode} onUpdateItem={handleUpdateItem} onUpdateCurrency={handleUpdateCurrency} onAdd={() => { setEditForm({ id: Date.now(), name: 'New Item', icon: 'misc', type: 'Item', damage: '-', desc: 'Description.', tag: 'misc', qty: 1, acBase: 0, acMaxDex: 99, acBonus: 0, isShield: false }); setIsEditingSlot(true); }} onSliceClick={handleSliceClick} selectedAction={selectedAction} />
+        ) : activeCategory === 'notes' ? (
+            <NotesPanel style={style} story={data.story || {}} notes={data.notes || []} onUpdateStory={handleUpdateStory} onAddNote={handleAddNote} onDeleteNote={handleDeleteNote} onUpdateNote={handleUpdateNote} />
+        ) : (
+            <div className="relative flex items-center">
+                {activeCategory === 'bonus' && (
+                    <button 
+                        onClick={() => { setActiveCategory('actions'); setSelectedAction(null); }}
+                        className={`absolute -left-12 z-20 w-10 h-20 ${style.bgPanel} ${style.border} ${style.borderPrimary} rounded-l-xl flex items-center justify-center hover:bg-white/10 transition-colors group shadow-xl`}
+                    >
+                        <div className="flex flex-col items-center gap-1">
+                            <ChevronLeft className={`${style.text}`} />
+                            <span className={`text-[10px] font-black uppercase ${style.textDim} group-hover:${style.text}`} style={{ writingMode: 'vertical-rl' }}>Actions</span>
+                        </div>
+                    </button>
+                )}
+                
+                <ActionWheel style={style} items={currentItems} selectedAction={selectedAction} hoveredAction={hoveredAction} editMode={editMode} onSliceClick={handleSliceClick} onHover={setHoveredAction} onLeave={() => setHoveredAction(null)} />
+                
+                {activeCategory === 'actions' && (
+                    <button 
+                        onClick={() => { setActiveCategory('bonus'); setSelectedAction(null); }}
+                        className={`absolute -right-12 z-20 w-10 h-20 ${style.bgPanel} ${style.border} ${style.borderPrimary} rounded-r-xl flex items-center justify-center hover:bg-white/10 transition-colors group shadow-xl`}
+                    >
+                        <div className="flex flex-col items-center gap-1">
+                            <ChevronRight className={`${style.text}`} />
+                            <span className={`text-[10px] font-black uppercase ${style.textDim} group-hover:${style.text}`} style={{ writingMode: 'vertical-rl' }}>Bonus</span>
+                        </div>
+                    </button>
+                )}
+            </div>
+        )}
+        {activeCategory !== 'stats' && activeCategory !== 'notes' && (<DetailsPanel style={style} selectedAction={selectedAction} lastRoll={lastRoll} setLastRoll={setLastRoll} editMode={editMode} onUpdateItem={handleUpdateItem} onRollAction={handleRollAction} canUseSpellSlot={canUseSpellSlot} />)}
+      </main>
+      {activeCategory === 'spells' && (<SpellSlotBar style={style} slots={data.spellSlots} editMode={editMode} onToggleSlot={handleToggleSpellSlot} onMaxSlotChange={handleMaxSlotChange} casterType={data.character.casterType} level={data.character.level} sorceryPoints={data.sorceryPoints || 0} onSorceryToggle={handleSorceryToggle} />)}
+      <nav className={`relative z-20 flex justify-center items-end pt-1 border-t-2 ${style.borderPrimary} ${style.bgPanel} w-full`}>
+        <div className="flex gap-1 overflow-x-auto pb-0 px-4 w-full md:justify-center justify-start max-w-3xl scrollbar-hide">{['stats', 'features', 'actions', 'spells', 'items', 'notes'].map(cat => {
+            const isActive = activeCategory === cat || (cat === 'actions' && activeCategory === 'bonus');
+            return (
+                <button key={cat} onClick={() => { setActiveCategory(cat); setSelectedAction(null); setLastRoll(null); }} className={`relative px-4 py-3 text-[10px] font-black uppercase tracking-widest transition-all duration-200 border-t-2 border-x-2 flex-shrink-0 ${style.rounded} rounded-b-none ${isActive ? `${style.tabActive} -mb-[2px] pb-4 z-10` : `${style.tabInactive} mb-0`}`}>{isActive && style.id === 'fantasy' && <div className={`absolute top-0 left-0 right-0 h-0.5 ${style.bgPrimary} shadow-[0_0_10px_${style.primaryHex}]`} />}{cat === 'stats' ? 'Character' : cat}</button>
+            )
+        })}</div>
+      </nav>
+      {isResting && (<RestModal style={style} data={data} onClose={() => setIsResting(false)} onRest={handleRest} />)}
+      {activeRoll && (<SimpleRollModal style={style} title={activeRoll.title} mod={activeRoll.mod} onClose={() => setActiveRoll(null)} />)}
+      {isConditionsOpen && (<ConditionsModal style={style} data={data} onClose={() => setIsConditionsOpen(false)} onToggleCondition={handleToggleCondition} onSetExhaustion={handleSetExhaustion} />)}
+      {isHealthOpen && (<HealthModal style={style} hp={data.character.hp} maxHp={data.character.maxHp} onClose={() => setIsHealthOpen(false)} onApply={handleHealthUpdate} />)}
+      {isDeathSavesOpen && (<DeathSaveModal style={style} deathSaves={data.deathSaves} onClose={() => setIsDeathSavesOpen(false)} onCommitResult={handleCommitDeathSave} onStabilize={handleStabilize} />)}
+      {isEditingSlot && (<EditSlotModal style={style} form={editForm} setForm={setEditForm} onClose={() => setIsEditingSlot(false)} onSave={handleSaveEdit} onDelete={handleDeleteSlot} isExisting={data.categories[activeCategory].find(x => x.id === editForm.id)} category={activeCategory} />)}
+      {isEditingCharacter && (<CharacterModal style={style} form={characterForm} setForm={setCharacterForm} onClose={() => setIsEditingCharacter(false)} onSave={handleCharacterSave} />)}
+    </div>
+  );
+}
